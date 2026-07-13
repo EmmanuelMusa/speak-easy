@@ -89,6 +89,16 @@ def append_gap_punctuation(text: str, gap: float) -> str:
     return text
 
 
+def collapse_ellipses(text: str) -> str:
+    """Collapse ellipses Whisper emits for trailing-off speech: a trailing
+    ellipsis becomes a single period; an internal one becomes a single space.
+    A lone period (e.g. "e.g.", "3.14") is left alone — only runs of 2+ dots
+    or the Unicode ellipsis are touched."""
+    text = re.sub(r"\s*(?:…|\.{2,})\s*$", ".", text)   # trailing -> "."
+    text = re.sub(r"\s*(?:…|\.{2,})\s*", " ", text)    # internal -> " "
+    return text.strip()
+
+
 def stitch_segments(segs: "list[tuple[float, float, str]]") -> str:
     """Join segments, inserting pause-based punctuation at the gaps."""
     parts: list[str] = []

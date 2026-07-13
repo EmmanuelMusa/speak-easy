@@ -4,7 +4,7 @@ SendInput INPUT struct stays the size Win32 demands."""
 import ctypes
 
 from app.injection import _INPUT
-from app.stt import append_gap_punctuation, stitch_segments, classify_gap
+from app.stt import append_gap_punctuation, stitch_segments, classify_gap, collapse_ellipses
 
 
 def test_long_pause_becomes_full_stop_and_capitalizes():
@@ -70,3 +70,14 @@ def test_input_struct_matches_win32_size():
     MOUSEINPUT). At 32, SendInput rejects every call and types nothing."""
     expected = 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28
     assert ctypes.sizeof(_INPUT) == expected
+
+
+def test_collapse_ellipses():
+    # Trailing "..." (trailing-off speech) -> a single period.
+    assert collapse_ellipses("I was just thinking...") == "I was just thinking."
+    assert collapse_ellipses("done…") == "done."
+    # Internal ellipsis -> a single space.
+    assert collapse_ellipses("wait... what") == "wait what"
+    # A normal single period is untouched.
+    assert collapse_ellipses("e.g. this") == "e.g. this"
+    assert collapse_ellipses("all good.") == "all good."
