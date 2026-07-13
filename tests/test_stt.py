@@ -4,7 +4,7 @@ SendInput INPUT struct stays the size Win32 demands."""
 import ctypes
 
 from app.injection import _INPUT
-from app.stt import append_gap_punctuation, stitch_segments
+from app.stt import append_gap_punctuation, stitch_segments, classify_gap
 
 
 def test_long_pause_becomes_full_stop_and_capitalizes():
@@ -51,6 +51,18 @@ def test_thinking_pause_gets_no_punctuation():
     assert append_gap_punctuation("we shipped the fix", 2.0) == "we shipped the fix."
     # Object-capable pronouns can end sentences and are not suppressed.
     assert append_gap_punctuation("I fixed it", 2.0) == "I fixed it."
+
+
+def test_classify_gap_kinds():
+    assert classify_gap("we shipped the fix", 2.0) == "period"
+    assert classify_gap("if the tests pass", 0.3) == "comma"
+    assert classify_gap("the quick brown", 0.1) == "none"
+    # Function word -> speaker thinking, never punctuation.
+    assert classify_gap("we should", 2.0) == "none"
+    # Already ends with a Whisper terminal -> nothing to add.
+    assert classify_gap("Is it ready?", 2.0) == "none"
+    # A long stop after a trailing comma is a full stop.
+    assert classify_gap("done,", 2.0) == "period"
 
 
 def test_input_struct_matches_win32_size():

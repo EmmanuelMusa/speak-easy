@@ -56,26 +56,35 @@ def _pause_is_thinking(text: str) -> bool:
     return bool(m) and m.group() in _THINKING_WORDS
 
 
-def append_gap_punctuation(text: str, gap: float) -> str:
-    """Punctuate `text` for a `gap`-second pause that followed it.
-
-    Terminal punctuation Whisper already emitted (. ? !) always wins; a
-    trailing comma is upgraded to a full stop when the pause was clearly a
-    stop, since the voice outranks the language model on where the speaker
-    actually stopped. But a pause after a function word is the speaker
-    THINKING, not punctuating — those get nothing, whatever their length.
-    """
-    if not text:
-        return text
-    if _pause_is_thinking(text):
-        return text
+def classify_gap(prev_text: str, gap: float) -> str:
+    """Classify the pause that followed `prev_text`: 'none' | 'comma' |
+    'period'. Mirrors append_gap_punctuation's decision so the two never
+    diverge: a pause after a function word is the speaker thinking (none); a
+    Whisper terminal already present needs nothing; a long stop is a period
+    (upgrading a trailing comma); a short stop after a word is a comma."""
+    if not prev_text or _pause_is_thinking(prev_text):
+        return "none"
+    last = prev_text[-1]
     if gap >= PERIOD_GAP_S:
+        if last.isalnum() or last == ",":
+            return "period"
+        return "none"
+    if gap >= COMMA_GAP_S and last.isalnum():
+        return "comma"
+    return "none"
+
+
+def append_gap_punctuation(text: str, gap: float) -> str:
+    """Punctuate `text` for a `gap`-second pause that followed it. Thin
+    wrapper over classify_gap so a single place owns the decision."""
+    kind = classify_gap(text, gap)
+    if kind == "period":
         if text[-1].isalnum():
             return text + "."
         if text[-1] == ",":
             return text[:-1] + "."
         return text
-    if gap >= COMMA_GAP_S and text[-1].isalnum():
+    if kind == "comma":
         return text + ","
     return text
 
