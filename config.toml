@@ -31,6 +31,12 @@ timeout_seconds = 15
 # On battery the GPU downclocks and the LLM runs several times slower; the
 # timeout is multiplied by this so cleanup completes instead of timing out.
 battery_timeout_multiplier = 4.0
+# Where sentence punctuation & capitalization come from:
+#   "model"  = the cleanup AI decides, from the words + context (recommended)
+#   "pauses" = also feed it the pause-timing punctuation (older behavior)
+# Flip this and restart to A/B the two. The offline fallback (AI off/unreachable)
+# always keeps the pause punctuation either way.
+punctuation_source = "model"
 # Personal dictionary: terms the LLM must preserve/spell exactly.
 custom_vocabulary = []
 

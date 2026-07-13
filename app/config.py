@@ -41,6 +41,12 @@ class CleanupConfig:
     # the timeout is multiplied by this so responses complete instead of
     # being abandoned for the dumb local fallback.
     battery_timeout_multiplier: float = 4.0
+    # Where sentence punctuation/casing comes from. "model": the cleanup LLM
+    # receives words + Whisper punctuation only and punctuates from context.
+    # "pauses": the LLM also gets the deterministic pause-derived punctuation
+    # (legacy behavior / A-B baseline). The offline fallback always keeps the
+    # pause punctuation regardless of this setting.
+    punctuation_source: str = "model"
     custom_vocabulary: list[str] = field(default_factory=list)
 
 
