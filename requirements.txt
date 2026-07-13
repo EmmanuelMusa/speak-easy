@@ -1,0 +1,9 @@
+faster-whisper>=1.0
+sounddevice>=0.4.6
+numpy
+global-hotkeys>=0.1.7
+pywin32>=306
+comtypes>=1.4
+requests>=2.31
+PySide6-Essentials>=6.6
+pytest>=8.0

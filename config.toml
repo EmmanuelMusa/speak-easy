@@ -1,0 +1,92 @@
+# Speak Easy — local Wispr Flow clone configuration
+
+[stt]
+# Whisper model size: tiny.en (fastest) | base | small.en | medium | large-v3
+model = "small.en"
+# "auto" tries CUDA first, falls back to CPU. Or force "cuda" / "cpu".
+device = "auto"
+# Compute type when on CUDA. CPU always uses int8.
+compute_type = "float16"
+language = "en"
+# Decoding beam: 1 = fastest, 5 = most accurate. 2 is a good balance.
+beam_size = 2
+# Transcribe while the hotkey is held: settled speech is committed in the
+# background, so on release only the last ~second needs transcribing.
+streaming = true
+
+[cleanup]
+# Master switch for the Ollama LLM cleanup pass.
+enabled = true
+# Clean finished sentences while you're still dictating; release then only
+# pays for the last unfinished sentence.
+streaming = true
+# Use 127.0.0.1 (not "localhost") — avoids a ~2s IPv6 fallback on Windows.
+ollama_url = "http://127.0.0.1:11434"
+# Cleanup model: llama3.2:3b (fast) | llama3.1:8b | phi3:mini | mistral:7b
+ollama_model = "llama3.2:3b"
+# Every utterance goes through the LLM, however short — that's what gets
+# "is it ready" typed as "Is it ready?" (Wispr Flow behavior).
+# Seconds to wait for Ollama before falling back to the local-only cleanup.
+timeout_seconds = 15
+# On battery the GPU downclocks and the LLM runs several times slower; the
+# timeout is multiplied by this so cleanup completes instead of timing out.
+battery_timeout_multiplier = 4.0
+# Personal dictionary: terms the LLM must preserve/spell exactly.
+custom_vocabulary = []
+
+[injection]
+# "clipboard" = copy + Ctrl+V (fast, reliable; clipboard is saved & restored)
+# "sendinput" = ctypes SendInput KEYEVENTF_UNICODE (types character by character)
+delivery_method = "clipboard"
+# Delay (seconds) between focusing back and delivering keystrokes.
+paste_delay = 0.05
+# Verify the paste landed (UI Automation); on a confirmed failure the text
+# stays on the clipboard and a notification tells you to Ctrl+V it.
+verify_paste = true
+# Paste chord for detected terminals: "ctrl_v" (default; works in Windows
+# Terminal, cmd, PowerShell, and TUI apps like Claude Code) or "shift_insert"
+# for older consoles that only accept Shift+Insert.
+terminal_paste = "ctrl_v"
+
+[hotkey]
+# Push-to-talk key. Hold to record, release to transcribe + inject.
+# Syntax follows the global-hotkeys package, e.g. "f9" or "control + shift + space".
+binding = "f9"
+
+[overlay]
+# Wispr-style pill at the bottom center: slim bar when idle, expands into a
+# live voice waveform while you dictate, gentle wave while processing.
+enabled = true
+
+[training]
+# When on: after each dictation a small feedback panel appears above the
+# pill. Thumbs-down + your ideal text teaches the cleanup LLM (few-shot)
+# and auto-learns misheard words into the vocabulary.
+enabled = true
+max_examples = 5
+# After thumbs-down, also fix the text already typed into the app (only if
+# you haven't edited it since — otherwise it's left alone).
+replace_on_correction = true
+
+[context]
+# Carry recent dictations into the next one as reference for the cleanup
+# LLM (names/terms/casing consistency). Never given to Whisper — prompt
+# text can leak into the transcript itself. In-memory only.
+enabled = true
+# Context older than this many seconds is ignored (new train of thought).
+expiry_seconds = 300
+# Cap on carried text, in characters.
+max_chars = 600
+# Read the text around the caret in the focused app (UI Automation) when
+# the hotkey is pressed: dictation then continues the sentence you're in
+# with correct casing, spacing, and punctuation. Password fields are never
+# read; apps that expose no text (terminals, Google Docs) are skipped.
+surrounding = true
+
+[audio]
+sample_rate = 16000
+channels = 1
+# Play a subtle low tone the moment recording starts (hotkey pressed), so you
+# get non-visual confirmation the press registered.
+start_sound = true
+start_sound_volume = 0.18

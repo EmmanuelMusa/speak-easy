@@ -1,0 +1,4 @@
+# Optional: CUDA runtime DLLs for GPU speech-to-text (ctranslate2).
+# The app registers these automatically at startup if present.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
