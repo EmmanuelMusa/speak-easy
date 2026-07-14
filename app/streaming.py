@@ -28,7 +28,7 @@ from typing import Callable
 
 import numpy as np
 
-from .stt import append_gap_punctuation
+from .stt import classify_gap, resolve_fallback, resolve_model, split_into_sentences
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +56,9 @@ class StreamingSession:
         self._window = window_seconds
         self._margin = margin_seconds
         self._poll = poll_interval
-        self._committed: list[str] = []
+        self._parts: list[str] = []
+        self._boundaries: list[str] = []
+        self._emitted = 0              # parts already yielded as sentences
         self._committed_samples = 0
         #: absolute end time (s) of the last absorbed segment — pauses
         #: between segments become punctuation, across pass boundaries too.
@@ -70,12 +72,6 @@ class StreamingSession:
     def start(self) -> "StreamingSession":
         self._thread.start()
         return self
-
-    def committed_parts(self) -> list[str]:
-        """Snapshot of committed text parts. All parts except the LAST are
-        immutable from here on (the last may still gain pause punctuation),
-        which is what lets live cleanup work on a stable prefix."""
-        return list(self._committed)
 
     def _loop(self) -> None:
         while not self._stop.wait(self._poll):
@@ -118,22 +114,55 @@ class StreamingSession:
             self._committed_samples += int(max(advance, last_end) * self._sr)
 
     def _absorb(self, segs, base: float) -> None:
-        """Append segment texts, turning inter-segment pauses (absolute
-        timeline, so pass/tail boundaries count too) into punctuation."""
+        """Append raw segment texts; record the inter-segment pause kind
+        (absolute timeline, so pass/tail boundaries count) as a boundary."""
         for start, end, text in segs:
             if text:
-                if self._committed and self._prev_end_abs is not None:
-                    before = self._committed[-1]
-                    self._committed[-1] = append_gap_punctuation(
-                        before, (base + start) - self._prev_end_abs
+                if self._parts and self._prev_end_abs is not None:
+                    self._boundaries.append(
+                        classify_gap(self._parts[-1], (base + start) - self._prev_end_abs)
                     )
-                self._committed.append(text)
+                self._parts.append(text)
             self._prev_end_abs = base + end
 
-    def finish(self, audio: np.ndarray) -> str:
-        """Stop passes, transcribe the uncommitted tail, return full text."""
+    def _resolve_range(self, a: int, b: int, source: str) -> str:
+        return resolve_model(self._parts[a:b + 1], self._boundaries[a:b], source)
+
+    def stable_sentences(self, source: str) -> list[str]:
+        """Newly-complete sentences that are also stable (do not reach into
+        the still-mutable last committed part). Advances an internal cursor."""
+        if len(self._parts) < 2:
+            return []
+        stable_upto = len(self._parts) - 1  # last part may still mutate
+        out: list[str] = []
+        for a, b in split_into_sentences(self._parts, self._boundaries):
+            if a < self._emitted:
+                continue
+            if b >= stable_upto:
+                break
+            out.append(self._resolve_range(a, b, source))
+            self._emitted = b + 1
+        return out
+
+    def remaining_sentences(self, source: str) -> list[str]:
+        """Every sentence not yet emitted, including the final partial one.
+        Call after finish() has absorbed the tail."""
+        out: list[str] = []
+        for a, b in split_into_sentences(self._parts, self._boundaries):
+            if a < self._emitted:
+                continue
+            out.append(self._resolve_range(a, b, source))
+            self._emitted = b + 1
+        return out
+
+    def fallback_text(self) -> str:
+        return resolve_fallback(self._parts, self._boundaries)
+
+    def finish(self, audio: np.ndarray, source: str = "model") -> str:
+        """Stop passes, transcribe the uncommitted tail, return the full text
+        in the requested view."""
         self._stop.set()
-        self._thread.join()  # let an in-flight pass land its commits
+        self._thread.join()
         tail = audio[self._committed_samples:]
         t0 = time.perf_counter()
         try:
@@ -141,7 +170,6 @@ class StreamingSession:
                 tail, initial_prompt=self._context()
             )
         except Exception:
-            # Whatever was committed already is still worth delivering.
             log.exception("Tail transcription failed")
             tail_segs = []
         self._absorb(tail_segs, self._committed_samples / self._sr)
@@ -153,8 +181,8 @@ class StreamingSession:
             len(tail) / self._sr,
             time.perf_counter() - t0,
         )
-        return " ".join(self._committed).strip()
+        return resolve_model(self._parts, self._boundaries, source)
 
     def _context(self) -> str | None:
-        joined = " ".join(self._committed)
+        joined = " ".join(self._parts)
         return joined[-_MAX_PROMPT_CHARS:] if joined else None

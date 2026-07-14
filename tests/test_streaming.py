@@ -45,16 +45,12 @@ def test_no_pass_until_window_filled():
 
 
 def test_commits_only_settled_segments():
-    # 5s of audio; segment ending at 4.6s is inside the 1.2s margin
-    # (cutoff 3.8s) and must NOT be committed yet.
     fake = FakeTranscriber(
         segment_script=[[(0.0, 2.0, "hello there"), (2.5, 4.6, "world")]]
     )
     s = _session(fake, lambda: _audio(5.0))
     s._pass_once()
-    assert s._committed == ["hello there"]
-    # Advances through the silence to the next segment's start (2.5s) so
-    # the boundary word isn't re-transcribed by the next pass.
+    assert s._parts == ["hello there"]
     assert s._committed_samples == int(2.5 * SR)
 
 
@@ -80,18 +76,14 @@ def test_finish_stitches_commits_and_tail():
     fake = FakeTranscriber(
         segment_script=[
             [(0.0, 2.0, "hello there"), (2.5, 4.6, "world")],
-            # Tail starts at the 2.5s commit boundary; speech resumes
-            # immediately, i.e. 0.5s after "hello there" ended at 2.0s.
             [(0.0, 1.5, "world again")],
         ]
     )
     s = _session(fake, lambda: _audio(5.0))
     s._pass_once()
-    s._thread.start()  # so finish() can join it
-    out = s.finish(_audio(6.0))
-    # The 0.5s pause at the commit/tail boundary becomes a comma.
-    assert out == "hello there, world again"
-    # Tail pass covered exactly the uncommitted audio, with context.
+    s._thread.start()
+    # Fallback view keeps the 0.5s pause as a comma; model view drops it.
+    assert s.finish(_audio(6.0), "pauses") == "hello there, world again"
     n_samples, prompt = fake.segment_calls[1]
     assert n_samples == int(3.5 * SR)
     assert prompt == "hello there"
@@ -101,7 +93,7 @@ def test_long_pause_becomes_full_stop_across_commits():
     fake = FakeTranscriber(
         segment_script=[
             [(0.0, 2.0, "we should ship it")],
-            [(1.5, 3.0, "also the docs need a pass")],  # 1.5s of silence
+            [(1.5, 3.0, "also the docs need a pass")],
         ]
     )
     buf = {"dur": 5.0}
@@ -109,7 +101,8 @@ def test_long_pause_becomes_full_stop_across_commits():
     s._pass_once()
     buf["dur"] = 8.0
     s._pass_once()
-    assert s._committed == ["we should ship it.", "also the docs need a pass"]
+    assert s._parts == ["we should ship it", "also the docs need a pass"]
+    assert s._boundaries == ["period"]
 
 
 def test_finish_without_commits_degrades_to_batch():
@@ -147,9 +140,22 @@ def test_finish_survives_tail_transcription_failure():
             raise RuntimeError("model gone")
 
     s = _session(DeadModel(), lambda: _audio(1.0))
-    s._committed = ["what we already have"]
+    s._parts = ["what we already have"]
     s._thread.start()
     assert s.finish(_audio(2.0)) == "what we already have"
+
+
+def test_stable_sentences_and_remaining():
+    fake = FakeTranscriber()
+    s = _session(fake, lambda: _audio(1.0))
+    s._parts = ["we shipped it", "the docs are next", "and then"]
+    s._boundaries = ["period", "none"]
+    # "we shipped it" is a complete, stable sentence (period pause; not the
+    # still-mutable last part). The rest is not yet stable.
+    assert s.stable_sentences("model") == ["we shipped it"]
+    assert s.stable_sentences("model") == []          # cursor advanced
+    # finish-time: everything remaining, including the final partial part.
+    assert s.remaining_sentences("model") == ["the docs are next and then"]
 
 
 def test_recorder_snapshot_is_nondestructive():
