@@ -266,3 +266,42 @@ def test_record_feedback_derives_verdict_and_replaces():
     assert fake.training.record.call_args.args[2] == "bad"
     fake.context.replace_last.assert_called_once_with("Ideal.")
     fake.injector.replace_last.assert_called_once_with("Ideal.")
+
+
+# --- relevant_corrections TF-IDF retriever ---------------------------------
+
+def test_relevant_corrections_ranks_shared_distinctive_term_first(tmp_path):
+    store = make_store(tmp_path)
+    store.record("schedule the meeting", "Schedule the meeting.", "bad", "Schedule the sync.")
+    store.record("deploy the kubernetes cluster", "Deploy the kubernetes cluster.",
+                 "bad", "Deploy the Kubernetes cluster.")
+    store.record("send the email", "Send the email.", "bad", "Send the mail.")
+    got = store.relevant_corrections("redeploy the kubernetes cluster now")
+    assert got, "expected a match"
+    assert got[0]["ideal"] == "Deploy the Kubernetes cluster."
+
+
+def test_relevant_corrections_gate_returns_empty_when_nothing_similar(tmp_path):
+    store = make_store(tmp_path)
+    store.record("deploy the kubernetes cluster", "Deploy the kubernetes cluster.",
+                 "bad", "Deploy the Kubernetes cluster.")
+    assert store.relevant_corrections("what time is lunch tomorrow") == []
+
+
+def test_relevant_corrections_surfaces_old_lesson_over_recent_noise(tmp_path):
+    store = make_store(tmp_path)
+    # one distinctive OLD correction, then 6 unrelated NEWER ones
+    store.record("call ogiop about it", "Call Ogiop about it.", "bad", "Call Ogiop about it.")
+    for i in range(6):
+        store.record(f"unrelated thing number {i}", f"Unrelated thing number {i}.",
+                     "bad", f"Totally different {i}.")
+    got = store.relevant_corrections("please call ogiop again")
+    assert any(e["ideal"] == "Call Ogiop about it." for e in got)
+
+
+def test_relevant_corrections_empty_inputs(tmp_path):
+    store = make_store(tmp_path)
+    assert store.relevant_corrections("anything") == []      # no corrections
+    store.record("call ogiop", "Call Ogiop.", "bad", "Call Ogiop.")
+    assert store.relevant_corrections("") == []               # empty query
+    assert store.relevant_corrections("   ") == []

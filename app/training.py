@@ -18,6 +18,7 @@ from __future__ import annotations
 import difflib
 import json
 import logging
+import math
 import re
 import threading
 import time
@@ -70,6 +71,59 @@ manage managed update updates updated improve improves improved change changed
 relevant important expertise punctuation comma commas period sentence word words
 good bad big small new old high low long short right wrong true false
 """.split())
+
+# Corrections below this TF-IDF cosine similarity to the current utterance are
+# not relevant enough to inject as few-shot examples: a shared distinctive term
+# (a name/jargon word) easily clears it, shared filler ("the", "and") does not.
+# Tunable heuristic — raise to be stricter, lower to inject looser matches.
+SIMILARITY_THRESHOLD = 0.1
+
+_TOKEN_RE = re.compile(r"[a-z0-9']+")
+
+
+def _tokens(text: str) -> list[str]:
+    return _TOKEN_RE.findall(text.lower())
+
+
+def _rank_by_tfidf(query: str, docs: list[str]) -> list[tuple[int, float]]:
+    """Rank `docs` by TF-IDF cosine similarity to `query`, highest first.
+    IDF is computed over `docs`; the query is scored against that same IDF.
+    Returns (doc_index, cosine) pairs; [] when query or docs are empty."""
+    q_tokens = _tokens(query)
+    doc_tokens = [_tokens(d) for d in docs]
+    if not q_tokens or not doc_tokens:
+        return []
+    n = len(doc_tokens)
+    df: dict[str, int] = {}
+    for toks in doc_tokens:
+        for t in set(toks):
+            df[t] = df.get(t, 0) + 1
+
+    def idf(t: str) -> float:
+        return math.log((1 + n) / (1 + df.get(t, 0))) + 1
+
+    def vec(tokens: list[str]) -> dict[str, float]:
+        tf: dict[str, int] = {}
+        for t in tokens:
+            tf[t] = tf.get(t, 0) + 1
+        return {t: c * idf(t) for t, c in tf.items()}
+
+    def norm(v: dict[str, float]) -> float:
+        return math.sqrt(sum(w * w for w in v.values()))
+
+    qv = vec(q_tokens)
+    qn = norm(qv)
+    scored: list[tuple[int, float]] = []
+    for i, toks in enumerate(doc_tokens):
+        dv = vec(toks)
+        dn = norm(dv)
+        if qn == 0 or dn == 0:
+            cos = 0.0
+        else:
+            cos = sum(qv[t] * dv[t] for t in qv if t in dv) / (qn * dn)
+        scored.append((i, cos))
+    scored.sort(key=lambda x: -x[1])
+    return scored
 
 
 class TrainingStore:
@@ -150,6 +204,26 @@ class TrainingStore:
             "\n\nThis user has corrected past outputs. Match these exactly "
             "when similar input appears:\n" + "\n\n".join(blocks)
         )
+
+    def relevant_corrections(self, query: str, n: int = 5) -> list[dict]:
+        """Corrections whose raw text is most TF-IDF-similar to `query`, above
+        SIMILARITY_THRESHOLD, best first, capped at `n`. Scores against ALL
+        stored corrections (not just recent), so a relevant old lesson still
+        surfaces; returns [] when nothing clears the bar or inputs are empty."""
+        if not query or not query.strip():
+            return []
+        entries = self.corrections(n=None)
+        if not entries:
+            return []
+        ranked = _rank_by_tfidf(query, [e.get("raw", "") for e in entries])
+        chosen: list[tuple[dict, float]] = []
+        for i, cos in ranked:
+            if cos < SIMILARITY_THRESHOLD:
+                break  # ranked is descending — the rest are lower too
+            chosen.append((entries[i], cos))
+        # tie-break equal-similarity matches toward the most recent
+        chosen.sort(key=lambda ec: (-ec[1], -ec[0].get("ts", 0)))
+        return [e for e, _ in chosen[:n]]
 
     # -- vocabulary ------------------------------------------------------------
 
