@@ -193,16 +193,22 @@ class PushToTalkApp:
 
     # -- training feedback ---------------------------------------------------
 
-    def _record_feedback(self, raw: str, output: str, verdict: str, ideal) -> None:
-        self.training.record(raw, output, verdict, ideal)
-        if verdict != "bad":
-            log.info("Feedback: ok")
+    def _record_feedback(self, raw: str, output: str, rating, transcript,
+                         ideal, tags) -> None:
+        # verdict retained only for the stored schema / legacy few-shot.
+        verdict = "ok" if (rating == 5 and not ideal) else "bad"
+        self.training.record(
+            raw, output, verdict, ideal,
+            rating=rating, transcript=transcript, tags=tags,
+        )
+        if not ideal:
+            log.info("Feedback: rating %s%s", rating,
+                     f", tags {tags}" if tags else "")
             return
-        log.info("Correction saved%s", " + ideal text" if ideal else "")
-        if ideal:
-            # The corrected text is what should inform the next dictation.
-            self.context.replace_last(ideal)
-        if ideal and self.cfg.training.replace_on_correction:
+        log.info("Correction saved (rating %s)", rating)
+        # The corrected text is what should inform the next dictation.
+        self.context.replace_last(ideal)
+        if self.cfg.training.replace_on_correction:
             replaced = self.injector.replace_last(ideal)
             log.info(
                 "In-place correction: %s",
