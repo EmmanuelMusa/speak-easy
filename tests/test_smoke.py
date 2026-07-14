@@ -295,3 +295,10 @@ def test_clean_uses_fallback_text_for_local_strip():
     out = Cleaner(cfg).clean("we shipped it the docs are next",
                              fallback_text="we shipped it. the docs are next")
     assert out == "We shipped it. The docs are next."
+
+
+def test_cleanup_streaming_defaults_off_for_holistic_quality():
+    # Holistic (whole-utterance) cleanup is the default; per-chunk streaming
+    # is opt-in. Chunking at pauses was what broke punctuation/lists.
+    from app.config import CleanupConfig
+    assert CleanupConfig().streaming is False

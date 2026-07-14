@@ -17,13 +17,15 @@ streaming = true
 [cleanup]
 # Master switch for the Ollama LLM cleanup pass.
 enabled = true
-# Clean finished sentences while you're still dictating; release then only
-# pays for the last unfinished sentence.
-streaming = true
+# Holistic cleanup (default): clean the whole utterance in one pass at release,
+# so punctuation and lists are decided from the full text, not sliced at your
+# pauses. Set true for per-chunk streaming (faster on long dictations, but lower
+# punctuation/list quality). Streaming transcription ([stt].streaming) is separate.
+streaming = false
 # Use 127.0.0.1 (not "localhost") — avoids a ~2s IPv6 fallback on Windows.
 ollama_url = "http://127.0.0.1:11434"
 # Cleanup model: llama3.2:3b (fast) | llama3.1:8b | phi3:mini | mistral:7b
-ollama_model = "llama3.2:3b"
+ollama_model = "llama3.1:8b"
 # Every utterance goes through the LLM, however short — that's what gets
 # "is it ready" typed as "Is it ready?" (Wispr Flow behavior).
 # Seconds to wait for Ollama before falling back to the local-only cleanup.

@@ -32,9 +32,11 @@ class SttConfig:
 @dataclass
 class CleanupConfig:
     enabled: bool = True
-    # Clean finished sentences with the LLM while you're still dictating,
-    # so release only pays for the last unfinished sentence.
-    streaming: bool = True
+    # Clean the WHOLE utterance in one pass at release (holistic): grammar
+    # decides sentence breaks and lists, not your pauses. Set True for the older
+    # per-chunk streaming (cleans finished sentences while you talk — faster on
+    # long dictations, but chunks at pauses so punctuation/lists suffer).
+    streaming: bool = False
     # 127.0.0.1, NOT localhost: on Windows, "localhost" tries IPv6 first and
     # wastes ~2s per request when the server only listens on IPv4.
     ollama_url: str = "http://127.0.0.1:11434"
