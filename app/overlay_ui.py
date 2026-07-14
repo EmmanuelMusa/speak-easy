@@ -6,11 +6,12 @@ Runs as its own process (`python -m app.overlay_ui`). Line protocol:
     state idle|recording|processing|hide
     level 0.42
     settings {"training_enabled": true, "hotkey": "f9", ...}
-    feedback {"id": 3, "preview": "text that was typed"}
+    feedback {"id": 3, "raw": "spoken text", "cleaned": "text that was typed"}
 
   child -> parent (stdout, JSON per line):
     {"type": "settings_saved", "values": {...}}
-    {"type": "feedback", "id": 3, "verdict": "ok" | "bad" | "timeout", "ideal": "..."}
+    {"type": "feedback", "id": 3, "rating": 1..5|null, "transcript": "..."|null,
+     "ideal": "..."|null, "tags": ["misheard word", ...]}
     {"type": "quit"}   (user hit Quit in settings; parent exits, closing stdin)
 
 Exits when stdin closes. All UI runs on the Qt main thread; stdin is read on
@@ -45,11 +46,36 @@ CHIP_W, CHIP_H = 122, 30
 GEAR_D = 16                        # settings-gear diameter inside the chip
 HOVER_GRACE_S = 0.5               # chip lingers briefly after the mouse leaves
 BARS = 11
-FEEDBACK_TIMEOUT_MS = 6000
 
 STT_MODELS = ["tiny.en", "base", "small.en", "medium", "large-v3"]
 OLLAMA_MODELS = ["llama3.1:8b", "llama3.2:3b", "phi3:mini", "mistral:7b"]
 DELIVERY = ["clipboard", "sendinput"]
+
+FEEDBACK_TAGS = ["misheard word", "wrong punctuation", "over-deleted",
+                 "wrong casing", "bad list"]
+
+FEEDBACK_QSS = """
+QWidget#root { background:#1b1b1f; border:1px solid #2e2e34; border-radius:12px; }
+QLabel { color:#e7e7ea; font-size:12px; }
+QLabel#preview { color:#d8d8de; font-size:12px; }
+QLabel#title { color:#ffffff; font-size:13px; font-weight:700; }
+QLabel[role="flabel"] { color:#7f8695; font-size:10px; font-weight:700;
+    letter-spacing:1.2px; }
+QLabel#ro { background:#141417; border:1px solid #27272d; border-radius:8px;
+    padding:7px 9px; color:#9a9aa2; }
+QPlainTextEdit { background:#232327; color:#e7e7ea; border:1px solid #3a3a44;
+    border-radius:8px; padding:6px 8px; font-size:12px; }
+QPlainTextEdit:focus { border:1px solid #6e96ff; }
+QPushButton#link { background:transparent; color:#6e96ff; border:none;
+    font-size:12px; font-weight:600; }
+QPushButton#tag { background:#232327; color:#b9b9c0; border:1px solid #3b3b42;
+    border-radius:11px; padding:4px 10px; font-size:11px; }
+QPushButton#tag:checked { background:#2a3350; color:#cdd8ff; border:1px solid #6e96ff; }
+QPushButton#ghost { background:#2a2a31; color:#e7e7ea; border:none;
+    border-radius:8px; padding:7px 13px; font-size:12px; }
+QPushButton#save { background:#6e96ff; color:#0f1220; border:none;
+    border-radius:8px; padding:7px 13px; font-size:12px; font-weight:700; }
+"""
 
 # Shared dark theme for the settings/review windows — matches the pill.
 DIALOG_QSS = """
@@ -141,6 +167,21 @@ def main() -> int:
                     path.lineTo(x, y)
         path.closeSubpath()
         path.addEllipse(center, hole, hole)  # OddEven fill -> hollow hub
+        return path
+
+    def _star_path(cx, cy, r_out, r_in, points=5):
+        """A crisp 5-point star as a QPainterPath (vector, no emoji)."""
+        path = QtGui.QPainterPath()
+        for i in range(points * 2):
+            r = r_out if i % 2 == 0 else r_in
+            ang = -math.pi / 2 + i * math.pi / points
+            x = cx + r * math.cos(ang)
+            y = cy + r * math.sin(ang)
+            if i == 0:
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
+        path.closeSubpath()
         return path
 
     # ------------------------------------------------------------------ pill
@@ -237,11 +278,15 @@ def main() -> int:
                 self.feedback_panel = FeedbackPanel(self, req)
                 self.feedback_panel.show()
             elif cmd == "selftest":
-                # Instantiate the dialogs so their render paths are exercised
-                # by automated tests (they can't click the gear).
+                # Instantiate the dialogs + feedback panel so their render paths
+                # are exercised by automated tests (they can't click).
                 try:
                     SettingsDialog(self.settings)
                     ReviewDialog().refresh()
+                    fp = FeedbackPanel(self, {"id": 0, "raw": "hello wrld",
+                                              "cleaned": "Hello world."})
+                    fp._expand()
+                    fp.close()
                     emit({"type": "selftest_ok"})
                 except Exception as exc:  # pragma: no cover - reported to parent
                     emit({"type": "selftest_err", "error": repr(exc)})
@@ -633,11 +678,61 @@ def main() -> int:
 
     # ------------------------------------------------------------- feedback
 
-    class FeedbackPanel(QtWidgets.QWidget):
-        """Small panel above the pill. Never steals keyboard focus until the
-        user explicitly clicks thumbs-down to type their ideal text."""
+    class StarBar(QtWidgets.QWidget):
+        """A row of `count` vector stars; click sets the rating (1..count)."""
+        rated = QtCore.Signal(int)
 
-        def __init__(self, bar: Bar, req: dict):
+        def __init__(self, count=5, size=20, interactive=True):
+            super().__init__()
+            self._count = count
+            self._size = size
+            self._rating = 0
+            self._interactive = interactive
+            self._cell = size + 5
+            self.setFixedSize(count * self._cell, size + 4)
+            if interactive:
+                self.setCursor(QtCore.Qt.PointingHandCursor)
+
+        def rating(self) -> int:
+            return self._rating
+
+        def setRating(self, n: int) -> None:
+            self._rating = max(0, min(self._count, int(n)))
+            self.update()
+
+        def _star_at(self, x: float) -> int:
+            return max(1, min(self._count, int(x // self._cell) + 1))
+
+        def mousePressEvent(self, event):
+            if self._interactive:
+                self.setRating(self._star_at(event.position().x()))
+                self.rated.emit(self._rating)
+
+        def paintEvent(self, _event):
+            p = QtGui.QPainter(self)
+            p.setRenderHint(QtGui.QPainter.Antialiasing)
+            s = self._size
+            for i in range(self._count):
+                cx = i * self._cell + self._cell / 2
+                cy = (s + 4) / 2
+                path = _star_path(cx, cy, s / 2, s / 4.4)
+                if i < self._rating:
+                    p.fillPath(path, QtGui.QColor(*ACCENT))
+                else:
+                    pen = QtGui.QPen(QtGui.QColor(74, 74, 84))
+                    pen.setWidthF(1.4)
+                    p.setPen(pen)
+                    p.setBrush(QtCore.Qt.NoBrush)
+                    p.drawPath(path)
+            p.end()
+
+    class FeedbackPanel(QtWidgets.QWidget):
+        """Progressive training feedback: a collapsed rating strip that expands
+        into a four-field teaching form. Never steals keyboard focus until the
+        user clicks 'Correct it'. No timeout — it waits until answered or is
+        superseded by the next dictation's panel."""
+
+        def __init__(self, bar: "Bar", req: dict):
             super().__init__(
                 None,
                 QtCore.Qt.FramelessWindowHint
@@ -646,79 +741,157 @@ def main() -> int:
                 | QtCore.Qt.WindowDoesNotAcceptFocus,
             )
             self.setAttribute(QtCore.Qt.WA_ShowWithoutActivating)
+            self.setObjectName("root")
+            self.setStyleSheet(FEEDBACK_QSS)
+            self.setFixedWidth(360)
+            self._bar = bar
             self.req = req
+            self.raw = str(req.get("raw", ""))
+            self.cleaned = str(req.get("cleaned", ""))
             self.answered = False
+            self._expanded = False
 
-            layout = QtWidgets.QVBoxLayout(self)
-            layout.setContentsMargins(10, 6, 10, 6)
-            preview = str(req.get("preview", ""))
-            if len(preview) > 52:
-                preview = preview[:52] + "…"
-            row = QtWidgets.QHBoxLayout()
-            label = QtWidgets.QLabel(f"“{preview}” — good?")
-            up = QtWidgets.QPushButton("\U0001F44D")
-            down = QtWidgets.QPushButton("\U0001F44E")
-            for b in (up, down):
-                b.setFixedSize(30, 24)
-                b.setFocusPolicy(QtCore.Qt.NoFocus)
-            up.clicked.connect(self._good)
-            down.clicked.connect(self._bad)
-            row.addWidget(label)
-            row.addWidget(up)
-            row.addWidget(down)
-            layout.addLayout(row)
+            self._root = QtWidgets.QVBoxLayout(self)
+            self._root.setContentsMargins(15, 13, 15, 13)
+            self._root.setSpacing(9)
 
-            self.ideal = QtWidgets.QLineEdit()
-            self.ideal.setPlaceholderText("What it should have said…")
-            self.ideal.setText(str(req.get("preview", "")))
-            self.ideal.returnPressed.connect(self._submit_ideal)
-            self.ideal.hide()
-            layout.addWidget(self.ideal)
+            self._preview = QtWidgets.QLabel(f"“{self.cleaned}”")
+            self._preview.setObjectName("preview")
+            self._preview.setWordWrap(True)
+            self._root.addWidget(self._preview)
 
-            self.setStyleSheet(
-                "QWidget{background:#202020;color:#e8e8e8;border-radius:8px;"
-                "font-size:11px}"
-                "QPushButton{background:#333;border:none;border-radius:5px}"
-                "QPushButton:hover{background:#4a4a4a}"
-                "QLineEdit{background:#2e2e2e;border:1px solid #555;"
-                "border-radius:4px;padding:3px}"
-            )
+            self._strip = QtWidgets.QHBoxLayout()
+            self._stars = StarBar()
+            self._stars.rated.connect(self._quick_rate)
+            self._correct = QtWidgets.QPushButton("Correct it ›")
+            self._correct.setObjectName("link")
+            self._correct.setCursor(QtCore.Qt.PointingHandCursor)
+            self._correct.setFocusPolicy(QtCore.Qt.NoFocus)
+            self._correct.clicked.connect(self._expand)
+            self._strip.addWidget(self._stars)
+            self._strip.addStretch(1)
+            self._strip.addWidget(self._correct)
+            self._root.addLayout(self._strip)
+
             self.adjustSize()
-            g = bar.geometry()
-            self.move(g.center().x() - self.width() // 2, g.top() - self.height() - 8)
+            self._reposition()
 
-            self._timer = QtCore.QTimer(self)
-            self._timer.setSingleShot(True)
-            self._timer.timeout.connect(self._timeout)
-            self._timer.start(FEEDBACK_TIMEOUT_MS)
+        # -- geometry ------------------------------------------------------
+        def _reposition(self):
+            self.adjustSize()
+            g = self._bar.geometry()
+            self.move(g.center().x() - self.width() // 2,
+                      g.top() - self.height() - 8)
 
-        def _finish(self, verdict: str, ideal: str | None = None):
+        # -- collapsed fast path -------------------------------------------
+        def _quick_rate(self, n: int):
+            self._submit(rating=n, transcript=None, ideal=None, tags=[])
+
+        # -- expand into the teaching form ---------------------------------
+        def _flabel(self, text: str) -> QtWidgets.QLabel:
+            lbl = QtWidgets.QLabel(text)
+            lbl.setProperty("role", "flabel")
+            return lbl
+
+        def _readonly(self, text: str) -> QtWidgets.QLabel:
+            lbl = QtWidgets.QLabel(text)
+            lbl.setObjectName("ro")
+            lbl.setWordWrap(True)
+            return lbl
+
+        def _editor(self, text: str) -> QtWidgets.QPlainTextEdit:
+            ed = QtWidgets.QPlainTextEdit(text)
+            ed.setTabChangesFocus(True)
+            fm = ed.fontMetrics()
+            ed.setFixedHeight(fm.lineSpacing() * 2 + 18)
+            return ed
+
+        def _expand(self):
+            if self._expanded:
+                return
+            self._expanded = True
+            # Hide the collapsed strip's "Correct it" link; keep the stars idea
+            # in the form instead.
+            self._correct.hide()
+            self._stars.hide()
+            self._preview.hide()
+
+            title_row = QtWidgets.QHBoxLayout()
+            title = QtWidgets.QLabel("Teach Speak Easy")
+            title.setObjectName("title")
+            self._form_stars = StarBar()
+            self._form_stars.setRating(self._stars.rating())
+            title_row.addWidget(title)
+            title_row.addStretch(1)
+            title_row.addWidget(self._form_stars)
+            self._root.addLayout(title_row)
+
+            self._root.addWidget(self._flabel("HEARD · SPEECH → TEXT"))
+            self._root.addWidget(self._readonly(self.raw))
+            self._root.addWidget(self._flabel("CLEANED · WHAT IT TYPED"))
+            self._root.addWidget(self._readonly(self.cleaned))
+
+            self._root.addWidget(self._flabel("WHAT YOU ACTUALLY SAID"))
+            self._actual = self._editor(self.raw)
+            self._root.addWidget(self._actual)
+            self._root.addWidget(self._flabel("IDEAL CLEANUP"))
+            self._ideal = self._editor(self.cleaned)
+            self._root.addWidget(self._ideal)
+
+            self._root.addWidget(self._flabel("WHAT WENT WRONG"))
+            tag_row = QtWidgets.QHBoxLayout()
+            tag_row.setSpacing(6)
+            self._tag_btns = {}
+            for t in FEEDBACK_TAGS:
+                b = QtWidgets.QPushButton(t)
+                b.setObjectName("tag")
+                b.setCheckable(True)
+                b.setCursor(QtCore.Qt.PointingHandCursor)
+                b.setFocusPolicy(QtCore.Qt.NoFocus)
+                self._tag_btns[t] = b
+                tag_row.addWidget(b)
+            tag_row.addStretch(1)
+            self._root.addLayout(tag_row)
+
+            btns = QtWidgets.QHBoxLayout()
+            cancel = QtWidgets.QPushButton("Cancel")
+            cancel.setObjectName("ghost")
+            cancel.setCursor(QtCore.Qt.PointingHandCursor)
+            cancel.clicked.connect(self.close)
+            save = QtWidgets.QPushButton("Save lesson")
+            save.setObjectName("save")
+            save.setCursor(QtCore.Qt.PointingHandCursor)
+            save.clicked.connect(self._save)
+            btns.addStretch(1)
+            btns.addWidget(cancel)
+            btns.addWidget(save)
+            self._root.addLayout(btns)
+
+            # Now the panel may take focus so the fields are editable.
+            self.setWindowFlag(QtCore.Qt.WindowDoesNotAcceptFocus, False)
+            self._reposition()
+            self.show()
+            self.activateWindow()
+            self._actual.setFocus()
+
+        def _save(self):
+            actual = self._actual.toPlainText().strip()
+            ideal_txt = self._ideal.toPlainText().strip()
+            transcript = actual if actual and actual != self.raw.strip() else None
+            ideal = ideal_txt if ideal_txt and ideal_txt != self.cleaned.strip() else None
+            tags = [t for t, b in self._tag_btns.items() if b.isChecked()]
+            rating = self._form_stars.rating() or None
+            self._submit(rating=rating, transcript=transcript, ideal=ideal, tags=tags)
+
+        # -- submit / close ------------------------------------------------
+        def _submit(self, rating, transcript, ideal, tags):
             if self.answered:
                 return
             self.answered = True
             emit({"type": "feedback", "id": self.req.get("id"),
-                  "verdict": verdict, "ideal": ideal})
+                  "rating": rating, "transcript": transcript,
+                  "ideal": ideal, "tags": tags})
             self.close()
-
-        def _good(self):
-            self._finish("ok")
-
-        def _bad(self):
-            # User opted in to typing: now the panel may take focus.
-            self._timer.stop()
-            self.setWindowFlag(QtCore.Qt.WindowDoesNotAcceptFocus, False)
-            self.ideal.show()
-            self.adjustSize()
-            self.show()
-            self.activateWindow()
-            self.ideal.setFocus()
-            self.ideal.selectAll()
-
-        def _submit_ideal(self):
-            self._finish("bad", self.ideal.text().strip() or None)
-
-        def _timeout(self):
-            self._finish("timeout")
 
     # ------------------------------------------------------------------ io
 
