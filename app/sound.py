@@ -25,22 +25,22 @@ _cache: dict[float, bytes] = {}
 
 
 def _render_cue(volume: float) -> bytes:
-    """A soft low 'start' blip: a G3 root with a gently-delayed fifth above
-    it, under a raised-cosine (Hann) envelope so there are no edge clicks.
-    ~150 ms, 16-bit mono WAV bytes."""
-    dur = 0.15
-    n = int(_SAMPLE_RATE * dur)
-    f_root, f_fifth = 196.00, 293.66  # G3 + D4: a soft fifth reads as "on"
+    """A soft, clearly-audible 'ready' blip: two short rising notes (E5 → B5),
+    each under a raised-cosine (Hann) envelope so there are no edge clicks.
+    Pitched high enough to carry over small laptop speakers (the old ~196 Hz
+    tone was near-inaudible on them). 16-bit mono WAV bytes."""
+    note, gap = 0.07, 0.012      # seconds per note / silent gap between
+    notes = (659.25, 987.77)     # E5 -> B5: bright and pleasant
     frames = bytearray()
-    for i in range(n):
-        t = i / _SAMPLE_RATE
-        env = 0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1))  # smooth in/out
-        lift = min(1.0, t / 0.05)  # fifth eases in over the first 50 ms
-        s = math.sin(2 * math.pi * f_root * t) + 0.5 * lift * math.sin(
-            2 * math.pi * f_fifth * t
-        )
-        val = max(-1.0, min(1.0, s / 1.5)) * env * volume
-        frames += struct.pack("<h", int(val * 32767))
+    for idx, f in enumerate(notes):
+        n = int(_SAMPLE_RATE * note)
+        for i in range(n):
+            t = i / _SAMPLE_RATE
+            env = 0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1))
+            val = math.sin(2 * math.pi * f * t) * env * volume
+            frames += struct.pack("<h", int(max(-1.0, min(1.0, val)) * 32767))
+        if idx == 0:
+            frames += b"\x00\x00" * int(_SAMPLE_RATE * gap)
     out = io.BytesIO()
     with wave.open(out, "wb") as w:
         w.setnchannels(1)

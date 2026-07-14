@@ -793,7 +793,7 @@ def main() -> int:
             self.setAttribute(QtCore.Qt.WA_ShowWithoutActivating)
             self.setObjectName("root")
             self.setStyleSheet(FEEDBACK_QSS)
-            self.setFixedWidth(360)
+            self.setFixedWidth(430)
             self._bar = bar
             self.req = req
             self.raw = str(req.get("raw", ""))
@@ -890,7 +890,7 @@ def main() -> int:
             ed = QtWidgets.QPlainTextEdit(text)
             ed.setTabChangesFocus(True)
             fm = ed.fontMetrics()
-            ed.setFixedHeight(fm.lineSpacing() * 2 + 18)
+            ed.setFixedHeight(fm.lineSpacing() * 4 + 16)  # ~4 lines, roomier
             return ed
 
         def _expand(self):
