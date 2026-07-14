@@ -2,6 +2,9 @@
 mining, overlay event dispatch, and settings persistence."""
 
 import json
+import wave
+
+import numpy as np
 
 from app.config import load_config, save_config_updates
 from app.cleanup import Cleaner
@@ -14,7 +17,8 @@ from unittest.mock import MagicMock, patch
 
 def make_store(tmp_path):
     return TrainingStore(
-        data_path=tmp_path / "data.jsonl", vocab_path=tmp_path / "vocab.json"
+        data_path=tmp_path / "data.jsonl", vocab_path=tmp_path / "vocab.json",
+        audio_dir=tmp_path / "training_audio",
     )
 
 
@@ -344,3 +348,35 @@ def test_relevant_corrections_tie_break_prefers_recent(tmp_path):
     # Identical raw -> identical similarity; the more recent must win the tie.
     got = store.relevant_corrections("redeploy the ogiop service", n=1)
     assert got and got[0]["ideal"] == "Deploy the Ogiop service NEW."
+
+
+def test_save_audio_writes_valid_wav(tmp_path):
+    store = make_store(tmp_path)
+    audio = np.array([0.0, 0.5, -0.5, 1.0, -1.0, 0.25], dtype=np.float32)
+    rel = store.save_audio(audio, 16000)
+    assert rel and rel.startswith("training_audio/") and rel.endswith(".wav")
+    wav_path = store.audio_dir.parent / rel
+    assert wav_path.exists()
+    with wave.open(str(wav_path), "rb") as wf:
+        assert wf.getnchannels() == 1
+        assert wf.getsampwidth() == 2
+        assert wf.getframerate() == 16000
+        assert wf.getnframes() == len(audio)
+
+
+def test_save_audio_empty_returns_none(tmp_path):
+    store = make_store(tmp_path)
+    assert store.save_audio(np.array([], dtype=np.float32), 16000) is None
+
+
+def test_record_stores_audio_path(tmp_path):
+    store = make_store(tmp_path)
+    store.record("raw", "Out.", "bad", "Ideal.", transcript="raw truth",
+                 audio_path="training_audio/123.wav")
+    assert store._all_entries()[-1]["audio"] == "training_audio/123.wav"
+
+
+def test_record_without_audio_path_is_null(tmp_path):
+    store = make_store(tmp_path)
+    store.record("raw", "Out.", "ok", rating=5)
+    assert store._all_entries()[-1]["audio"] is None

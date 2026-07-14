@@ -22,6 +22,7 @@ import math
 import re
 import threading
 import time
+import wave
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ log = logging.getLogger(__name__)
 _ROOT = Path(__file__).resolve().parent.parent
 DATA_PATH = _ROOT / "training_data.jsonl"
 VOCAB_PATH = _ROOT / "learned_vocab.json"
+AUDIO_DIR = _ROOT / "training_audio"
 
 # Substituted spans longer than this are style changes, not vocabulary.
 _MAX_VOCAB_SPAN = 3
@@ -130,16 +132,18 @@ def _rank_by_tfidf(query: str, docs: list[str]) -> list[tuple[int, float]]:
 
 
 class TrainingStore:
-    def __init__(self, data_path: Path = DATA_PATH, vocab_path: Path = VOCAB_PATH):
+    def __init__(self, data_path: Path = DATA_PATH, vocab_path: Path = VOCAB_PATH,
+                 audio_dir: Path = AUDIO_DIR):
         self.data_path = data_path
         self.vocab_path = vocab_path
+        self.audio_dir = audio_dir
         self._lock = threading.Lock()
 
     # -- recording -----------------------------------------------------------
 
     def record(self, raw: str, output: str, verdict: str, ideal: str | None = None,
                *, rating: int | None = None, transcript: str | None = None,
-               tags: list[str] | None = None) -> None:
+               tags: list[str] | None = None, audio_path: str | None = None) -> None:
         """Append one feedback entry and mine vocabulary. `verdict` is kept for
         backward compatibility; `rating` (1-5), `transcript` (what the user
         actually said) and `tags` are the richer signal. Mines TWO diffs: the
@@ -153,6 +157,7 @@ class TrainingStore:
             "transcript": transcript or None,
             "ideal": ideal or None,
             "tags": list(tags) if tags else [],
+            "audio": audio_path,
             "verdict": verdict,          # "ok" | "bad" (derived, kept for compat)
         }
         with self._lock:
@@ -166,6 +171,29 @@ class TrainingStore:
         if learned:
             self._add_vocab(learned)
             log.info("Learned vocabulary: %s", learned)
+
+    def save_audio(self, audio, sample_rate: int) -> str | None:
+        """Write `audio` (a float32 mono ndarray in [-1, 1]) as a 16-bit PCM mono
+        WAV under audio_dir; return its path relative to audio_dir.parent (the
+        project root in production), e.g. "training_audio/<ts>.wav" — or None for
+        empty audio / on any error. Never raises: a failed save must not break
+        dictation."""
+        try:
+            if audio is None or len(audio) == 0:
+                return None
+            self.audio_dir.mkdir(parents=True, exist_ok=True)
+            name = f"{int(time.time() * 1000)}.wav"
+            path = self.audio_dir / name
+            pcm = (audio.clip(-1.0, 1.0) * 32767.0).astype("<i2")
+            with wave.open(str(path), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(int(sample_rate))
+                wf.writeframes(pcm.tobytes())
+            return f"{self.audio_dir.name}/{name}"
+        except Exception as exc:
+            log.warning("Could not save correction audio (%s)", exc)
+            return None
 
     # -- few-shot corrections ---------------------------------------------
 
