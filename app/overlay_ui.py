@@ -889,19 +889,20 @@ def main() -> int:
             self._root.addWidget(self._ideal)
 
             self._root.addWidget(self._flabel("WHAT WENT WRONG"))
-            tag_row = QtWidgets.QHBoxLayout()
-            tag_row.setSpacing(6)
+            # 3-per-row grid so all five chips fit the fixed-width panel with
+            # uniform widths (a single row overflows / clips at 360px).
+            tag_grid = QtWidgets.QGridLayout()
+            tag_grid.setSpacing(6)
             self._tag_btns = {}
-            for t in FEEDBACK_TAGS:
+            for idx, t in enumerate(FEEDBACK_TAGS):
                 b = QtWidgets.QPushButton(t)
                 b.setObjectName("tag")
                 b.setCheckable(True)
                 b.setCursor(QtCore.Qt.PointingHandCursor)
                 b.setFocusPolicy(QtCore.Qt.NoFocus)
                 self._tag_btns[t] = b
-                tag_row.addWidget(b)
-            tag_row.addStretch(1)
-            self._root.addLayout(tag_row)
+                tag_grid.addWidget(b, idx // 3, idx % 3)
+            self._root.addLayout(tag_grid)
 
             btns = QtWidgets.QHBoxLayout()
             cancel = QtWidgets.QPushButton("Cancel")
