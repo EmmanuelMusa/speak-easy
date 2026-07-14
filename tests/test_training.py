@@ -151,6 +151,17 @@ def test_feedback_transcript_only_dispatch():
     assert ov._pending is None
 
 
+def test_feedback_tags_only_dispatch():
+    ov = Overlay(enabled=False)
+    seen = []
+    ov.on_feedback = lambda *a: seen.append(a)
+    ov._pending = (8, "raw", "out")
+    ov._dispatch({"type": "feedback", "id": 8, "rating": None,
+                  "transcript": None, "ideal": None, "tags": ["bad list"]})
+    assert seen == [("raw", "out", None, None, None, ["bad list"])]
+    assert ov._pending is None
+
+
 def test_feedback_dismiss_not_recorded():
     ov = Overlay(enabled=False)
     calls = []
@@ -236,3 +247,22 @@ def test_corrections_filter_by_ideal_not_verdict(tmp_path):
     corr = store.corrections(n=None)
     assert len(corr) == 1
     assert corr[0]["ideal"] == "Bravo."
+
+
+def test_record_feedback_derives_verdict_and_replaces():
+    from unittest.mock import MagicMock
+    from app.hotkey import PushToTalkApp
+    # rating 5, no ideal -> verdict "ok", no in-place replace
+    fake = MagicMock()
+    fake.cfg.training.replace_on_correction = True
+    PushToTalkApp._record_feedback(fake, "raw", "out", 5, None, None, [])
+    assert fake.training.record.call_args.args[2] == "ok"     # derived verdict
+    fake.context.replace_last.assert_not_called()
+    fake.injector.replace_last.assert_not_called()
+    # rating 2 with ideal -> verdict "bad", context + injector replace
+    fake = MagicMock()
+    fake.cfg.training.replace_on_correction = True
+    PushToTalkApp._record_feedback(fake, "raw", "out", 2, None, "Ideal.", ["x"])
+    assert fake.training.record.call_args.args[2] == "bad"
+    fake.context.replace_last.assert_called_once_with("Ideal.")
+    fake.injector.replace_last.assert_called_once_with("Ideal.")

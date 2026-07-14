@@ -163,7 +163,7 @@ class Overlay:
             # An answer carries a rating or an ideal correction; a dismiss
             # (Cancel / closed unanswered) carries neither and is not recorded.
             if (event.get("rating") is not None or event.get("ideal")
-                    or event.get("transcript")) and self.on_feedback:
+                    or event.get("transcript") or event.get("tags")) and self.on_feedback:
                 _id, raw, output = pending
                 self.on_feedback(
                     raw, output, event.get("rating"), event.get("transcript"),
