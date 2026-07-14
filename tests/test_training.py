@@ -321,3 +321,26 @@ def test_relevant_corrections_empty_inputs(tmp_path):
     store.record("call ogiop", "Call Ogiop.", "bad", "Call Ogiop.")
     assert store.relevant_corrections("") == []               # empty query
     assert store.relevant_corrections("   ") == []
+
+
+def test_relevant_corrections_ignores_short_stopword_query(tmp_path):
+    store = make_store(tmp_path)
+    store.record("yes I think we should ship it", "Yes, I think we should ship it.",
+                 "bad", "Yes, we should ship it.")
+    # A one-word streamed chunk must NOT match on a shared common word.
+    assert store.relevant_corrections("yes") == []
+    assert store.relevant_corrections("yes.") == []
+    assert store.relevant_corrections("okay") == []
+
+
+def test_relevant_corrections_tie_break_prefers_recent(tmp_path):
+    import time as _t
+    store = make_store(tmp_path)
+    store.record("deploy the ogiop service", "Deploy the ogiop service.",
+                 "bad", "Deploy the Ogiop service OLD.")
+    _t.sleep(0.01)  # ensure a later ts
+    store.record("deploy the ogiop service", "Deploy the ogiop service.",
+                 "bad", "Deploy the Ogiop service NEW.")
+    # Identical raw -> identical similarity; the more recent must win the tie.
+    got = store.relevant_corrections("redeploy the ogiop service", n=1)
+    assert got and got[0]["ideal"] == "Deploy the Ogiop service NEW."

@@ -82,7 +82,10 @@ _TOKEN_RE = re.compile(r"[a-z0-9']+")
 
 
 def _tokens(text: str) -> list[str]:
-    return _TOKEN_RE.findall(text.lower())
+    """Content tokens for retrieval: lowercased words minus common stopwords,
+    so a shared function word ('yes', 'the') can't drive a match — which would
+    over-fire on short streamed sentence chunks like 'Yes.'."""
+    return [t for t in _TOKEN_RE.findall(text.lower()) if t not in _COMMON_WORDS]
 
 
 def _rank_by_tfidf(query: str, docs: list[str]) -> list[tuple[int, float]]:
@@ -212,6 +215,10 @@ class TrainingStore:
         stored corrections (not just recent), so a relevant old lesson still
         surfaces; returns [] when nothing clears the bar or inputs are empty."""
         if not query or not query.strip():
+            return []
+        # Too few content words to judge relevance (e.g. a short "Yes." chunk in
+        # streaming); a coincidental single-word overlap must not clear the bar.
+        if len(_tokens(query)) < 2:
             return []
         entries = self.corrections(n=None)
         if not entries:
