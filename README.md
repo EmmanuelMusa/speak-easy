@@ -10,17 +10,14 @@ A fully local, offline [Wispr Flow](https://wisprflow.ai)-style dictation app fo
 hold F9 ──► mic capture ──► Silero VAD + faster-whisper (CUDA/CPU)
                                         │ raw transcript
                                         ▼
-                    < 10 words?  ──yes──► local filler strip only  (fast path)
-                          │no
-                          ▼
                 Ollama LLM cleanup (fillers, casing, punctuation, grammar)
-                          │
+                          │   (falls back to a local strip if Ollama is unavailable)
                           ▼
             inject at cursor: clipboard Ctrl+V  or  SendInput Unicode typing
 ```
 
 - **STT:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2) with `vad_filter=True` (Silero VAD gates silence). Batch-after-silence — no streaming.
-- **Cleanup:** near-verbatim by design. Only vocal noises (`um, uh, mm, ehmm, oouu...`) are removed — conversational phrases ("you know", "I mean"), stutters ("the the"), and your word choice are untouched. A local LLM served by [Ollama](https://ollama.com) adds capitalization/punctuation, formats dictated enumerations as lists, and resolves explicit self-corrections ("no, sorry, by 3 p.m." → keeps only 3 p.m., in your words). A divergence guard rejects any LLM output that paraphrases (too many words you never said) and delivers the locally-stripped verbatim text instead. Utterances **under 10 words skip the LLM entirely** (~0 ms cleanup). If Ollama is down or slow, we fall back to the local strip — dictation never blocks.
+- **Cleanup:** near-verbatim by design. Only vocal noises (`um, uh, mm, ehmm, oouu...`) are removed — conversational phrases ("you know", "I mean"), stutters ("the the"), and your word choice are untouched. A local LLM served by [Ollama](https://ollama.com) adds capitalization/punctuation, formats dictated enumerations as lists, and resolves explicit self-corrections ("no, sorry, by 3 p.m." → keeps only 3 p.m., in your words). A divergence guard rejects any LLM output that paraphrases (too many words you never said) and delivers the locally-stripped verbatim text instead. **Every utterance goes through the LLM**, however short — "is it ready" comes out "Is it ready?". If Ollama is down or slow, we fall back to the local strip — dictation never blocks. By default the **model owns punctuation** (`[cleanup].punctuation_source = "model"`): your pauses inform, but don't dictate, where sentences break — see below.
 - **Injection:** two methods (see below).
 
 ## Setup
@@ -37,8 +34,9 @@ python -m venv .venv
 Install Ollama from <https://ollama.com/download> (or `winget install Ollama.Ollama`), then pull a model:
 
 ```powershell
-ollama pull llama3.1:8b     # default — best quality
-# lighter alternatives (set [cleanup].ollama_model in config.toml):
+ollama pull llama3.2:3b     # shipped default — fast, good with the armored prompt
+# heavier / lighter alternatives (set [cleanup].ollama_model in config.toml):
+ollama pull llama3.1:8b     # higher quality; streaming cleanup hides most of the latency
 ollama pull phi3:mini       # ~2.2 GB, fastest
 ollama pull mistral:7b
 ```
@@ -65,7 +63,7 @@ Syntax follows the [global-hotkeys](https://pypi.org/project/global-hotkeys/) pa
 .\.venv\Scripts\python -m app --no-cleanup                  # skip the LLM pass
 ```
 
-First run downloads the Whisper model (`tiny.en` ≈ 75 MB) to your Hugging Face cache; after that everything is offline.
+First run downloads the Whisper model (`small.en` ≈ 465 MB by default; `tiny.en` ≈ 75 MB if you set a smaller `[stt].model`) to your Hugging Face cache; after that everything is offline.
 
 Only one instance runs at a time (two would double-type every dictation): a second launch shows "already running" and exits. `--dry-run` is exempt.
 
@@ -73,15 +71,20 @@ Only one instance runs at a time (two would double-type every dictation): a seco
 
 Hover the pill — a gear icon fades in on its right; click it for the settings window (training mode, hotkey, speech model, cleanup model, cleanup on/off, text delivery). Changes apply live and save to `config.toml`; the hotkey rebinds instantly and a speech-model change reloads in the background.
 
-**Training mode** (off by default): when on, a small 👍/👎 panel appears above the pill after each dictation. It never steals your keyboard focus — keep typing, or ignore it and it fades after 6 s.
-- 👍 (or ignore) → logged as good.
-- 👎 → a field opens for what it *should* have said. That correction is saved to `training_data.jsonl` and used two ways: recent corrections are injected into the cleanup prompt as few-shot examples (style/formatting improves immediately), and misheard words (names, jargon) are auto-added to a learned vocabulary (`learned_vocab.json`) so they stop being mistranscribed.
+**Training mode** (off by default): when on, a compact feedback strip appears above the pill after each dictation — the full cleaned text, a 1–5 **star** rating, and a "Correct it" link. It never steals your keyboard focus, and (unlike a toast) it does not time out.
+- **Rate** — tap a star; logged and done.
+- **Correct it** — the strip expands into a teaching form showing what was **heard** (raw speech→text) and how it was **cleaned**, with editable fields for **what you actually said** and the **ideal cleanup**, plus one-tap failure tags (misheard word, wrong punctuation, over-deleted, wrong casing, bad list).
+
+Corrections are saved to `training_data.jsonl` and used three ways:
+- **Cleanup few-shot** — the corrections *most relevant to what you're currently dictating* (TF-IDF-ranked over your whole history, not just the last few) are injected into the cleanup prompt, so style/formatting fixes generalize. Nothing relevant → nothing injected.
+- **Vocabulary** — genuinely misheard names/jargon are auto-added to a learned vocabulary (`learned_vocab.json`) so they stop being mistranscribed; ordinary re-wordings are filtered out.
+- **Voice training data** — if you fill in *what you actually said*, that dictation's audio is saved (16-bit WAV in `training_audio/`, gitignored) paired with your verbatim text: the `(audio, transcript)` pairs needed to later fine-tune the speech model to your voice. Toggle with `[training].save_correction_audio`.
 
 **Fix-in-place:** when you submit a correction, the app also replaces the text it already typed into your app — *but only if you haven't touched it since*. It re-selects exactly what it typed, verifies it's unchanged (clipboard compare), and either replaces it or, if you've kept typing, leaves your text alone. Toggle with "Fix the typed text in place on correction" in Settings (`[training] replace_on_correction`).
 
-**Review learnings:** Settings → "Review learnings…" opens a panel listing every correction example and learned word, each with a **Forget** button. Removing a lesson takes effect on your next dictation. Undo a bad correction anytime.
+**Review learnings:** Settings → "Review learnings…" opens a dashboard: your progress toward the voice-training-data target (`[training].target_pairs`, default 200 pairs — roughly where a personal fine-tune starts to be worthwhile), then every correction example and learned word, each with a **Forget** button. Removing a lesson takes effect on your next dictation.
 
-Nothing is fine-tuned — learning is instant and fully local. The collected JSONL is also exactly the dataset you'd need for a real offline LoRA fine-tune later.
+The cleanup and vocabulary learning is instant and fully local — no weights are touched. Separately, the collected `(audio, transcript)` pairs are the dataset for an eventual offline LoRA fine-tune of Whisper to your voice — a future, separate step, worth doing once you've accumulated a few hundred pairs.
 
 ## Spoken commands
 
@@ -110,7 +113,7 @@ Set `[injection].delivery_method` in `config.toml`:
 
 Everything lives in `config.toml`:
 
-- `[stt]` — `model` (`tiny.en` default; `base`/`small`/`medium`/`large-v3` for more accuracy), `device` (`auto` tries CUDA, falls back to CPU int8), `compute_type`.
+- `[stt]` — `model` (`small.en` default; `tiny.en` for speed, `medium`/`large-v3` for more accuracy), `device` (`auto` tries CUDA, falls back to CPU int8), `compute_type`.
 - `[cleanup]` — `enabled`, `ollama_model`, `timeout_seconds`, `custom_vocabulary` (names/jargon the LLM must preserve exactly). Every utterance goes through the LLM, however short — "is it ready" comes out "Is it ready?"; the local strip is only the failure fallback.
 - `[cleanup].battery_timeout_multiplier` — on battery the GPU downclocks and the LLM runs several times slower; the Ollama timeout is multiplied by this (default 4) so cleanup completes at full quality instead of timing out. The app also opts itself out of Windows Power Throttling (EcoQoS) at startup, so audio capture and transcription keep full CPU speed on battery. For the fastest on-battery dictation, additionally set Windows Power mode to "Best performance" and the NVIDIA setting "Battery Boost" off — GPU clocks are driver policy and can't be raised from the app.
 - **Quitting** — hover the pill; it morphs into a **Settings** chip. Click it, then "Quit" in the popup. This fully closes the app (hotkey and single-instance lock released) so you can start it again — e.g. after pulling new features.
@@ -121,7 +124,7 @@ Everything lives in `config.toml`:
 - `[stt].beam_size` — decoding beam (1 = fastest, 5 = most accurate, default 2).
 - `[context]` — `enabled`, `expiry_seconds`, `max_chars`. Cross-utterance context: your recent dictations (in-memory only, recency-capped) become a reference block for the cleanup LLM, so names, jargon, and casing stay consistent across consecutive dictations. Context is deliberately **never** fed to Whisper — decoder prompt text can leak into the raw transcript on ambiguous audio, upstream of the divergence guard. A training-mode correction replaces the context too, so the fix propagates forward.
 - `[context].surrounding` — surrounding-text context (default on). At hotkey press the text around the caret is read via UI Automation (off the hot path, in a worker thread): it drives cleanup continuation — dictating mid-sentence continues in lowercase without a stray trailing period — and a leading space is added when pasting directly after a word. Like dictation history, it is never fed to Whisper. Best-effort: works in Word/Outlook/browsers/most native apps; terminals and canvas editors (Google Docs) silently get the old behavior. Password fields are never read.
-- **Pause punctuation** — your pauses become punctuation: a spoken beat (~½s) inserts a comma, a real stop (~1s) a full stop with the next word capitalized. Whisper's own `?` `.` `!` always win; a trailing comma before a long stop is upgraded to a full stop, because the voice outranks the language model on where you actually stopped.
+- `[cleanup].punctuation_source` — **who decides punctuation**. `"model"` (default) gives the cleanup LLM your words plus Whisper's own punctuation and lets it punctuate and capitalize from context, so a brief pause no longer forces a full stop or a stray mid-sentence capital. `"pauses"` restores the older behavior where pause timing pre-inserts commas/periods (a spoken beat → comma, a real stop → full stop). Flip it and restart to A/B the two. Either way a pause never forces a capital and trailing-off "…" is collapsed; the offline fallback (Ollama unavailable) always applies pause-timing punctuation so the text still has structure.
 - `[cleanup].streaming` — live cleanup (default on, requires `[stt].streaming`). Finished sentences are cleaned by the LLM while you're still dictating; at release only the last unfinished sentence is cleaned, so the wait stays near-constant regardless of dictation length. Self-corrections that reference the previous sentence merge and re-clean it.
 - **Lists** — a dictated enumeration becomes a numbered list, built **deterministically** in code (not left to the model, which is unreliable at restructuring already-punctuated sentences at this size). When the text carries 2+ ordinal cues at sentence/clause starts ("Firstly, I'll… Secondly, I'll… Thirdly, I'll…", "First, … Second, …", "Number one, … Number two, …", mixing commas and periods), the lead-in becomes a "…:" line and each ordinal-led clause becomes a numbered item with the ordinal word dropped and everything else kept. Ordinary prose that merely contains "first" (e.g. "first aid", "I went first then came home") is never turned into a list.
 - **Thinking pauses** — a pause after a function word ("we should …", "move it to the …") is treated as the speaker thinking, never as punctuation, and the cleanup LLM is instructed to drop pause-punctuation that interrupts a grammatical unit.
@@ -133,7 +136,7 @@ Everything lives in `config.toml`:
 .\.venv\Scripts\python -m pytest
 ```
 
-Covers filler stripping, the <10-word skip-LLM branch, LLM-failure fallback, and injection dispatch (OS keystrokes and Ollama are mocked).
+Covers filler stripping, the always-LLM cleanup path, LLM-failure fallback, model/pauses punctuation views, relevance-ranked correction retrieval, audio-pair capture, and injection dispatch (OS keystrokes and Ollama are mocked).
 
 ## Notes
 
