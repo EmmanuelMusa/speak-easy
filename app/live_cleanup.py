@@ -27,7 +27,6 @@ the whole utterance looks like an enumeration (see _looks_like_enumeration).
 from __future__ import annotations
 
 import logging
-import re
 import threading
 from typing import Callable
 
@@ -35,23 +34,6 @@ from .cleanup import _CORRECTION_CUE_RE, looks_like_enumeration, reformat_enumer
 from .focus import Surrounding
 
 log = logging.getLogger(__name__)
-
-# Sentence end: terminal punctuation not preceded by a single-letter
-# abbreviation ("p.m.", "e.g.") and followed by a space or end-of-text.
-_SENT_END_RE = re.compile(r"(?<![.\s][A-Za-z])[.?!]+(?=\s|$)")
-
-
-def _split_sentences(chunk: str) -> list[str]:
-    out, prev = [], 0
-    for m in _SENT_END_RE.finditer(chunk):
-        sent = chunk[prev:m.end()].strip()
-        if sent:
-            out.append(sent)
-        prev = m.end()
-    rest = chunk[prev:].strip()
-    if rest:
-        out.append(rest)
-    return out
 
 
 class LiveCleanup:
@@ -70,7 +52,6 @@ class LiveCleanup:
         self._poll = poll_interval
         self._raw: list[str] = []      # raw sentences, aligned with _cleaned
         self._cleaned: list[str] = []
-        self._consumed = 0             # chars consumed of " ".join(parts)
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._loop, name="live-cleanup", daemon=True
@@ -87,22 +68,14 @@ class LiveCleanup:
             except Exception:
                 log.exception("Live cleanup pass failed; final pass covers it")
 
-    def _poll_once(self) -> None:
-        parts = self._session.committed_parts()
-        if len(parts) < 2:
-            return  # the last part may still mutate; nothing stable yet
-        stable = " ".join(parts[:-1])
-        region = stable[self._consumed:]
-        last = None
-        for m in _SENT_END_RE.finditer(region):
-            last = m
-        if last is None:
-            return
-        chunk, self._consumed = region[: last.end()], self._consumed + last.end()
-        for sent in _split_sentences(chunk):
-            self._clean_one(sent)
+    def _source(self) -> str:
+        return getattr(self._cleaner.cfg, "punctuation_source", "model")
 
-    def _clean_one(self, raw_sent: str) -> None:
+    def _poll_once(self) -> None:
+        for sent in self._session.stable_sentences(self._source()):
+            self._clean_one(sent, last=False)
+
+    def _clean_one(self, raw_sent: str, last: bool) -> None:
         # A correction may refer to the previous sentence — re-clean both.
         if self._raw and _CORRECTION_CUE_RE.search(raw_sent):
             raw_sent = self._raw.pop() + " " + raw_sent
@@ -113,8 +86,8 @@ class LiveCleanup:
             self._cleaner.clean(
                 raw_sent,
                 context=self._chunk_context(first),
-                surrounding=self._chunk_surrounding(first=first, last=False),
-                reformat=False,  # per-chunk; the list is built once at finalize
+                surrounding=self._chunk_surrounding(first=first, last=last),
+                reformat=False,
             )
         )
 
@@ -137,27 +110,13 @@ class LiveCleanup:
         )
 
     def finalize(self, raw_full: str) -> str:
-        """Stop the worker, clean the remaining tail, return the full text."""
+        """Stop the worker, clean the remaining sentences, return full text."""
         self._stop.set()
-        self._thread.join()  # waits out an in-flight sentence cleanup
-        tail = raw_full[self._consumed:].strip()
-        if tail:
-            if self._raw and _CORRECTION_CUE_RE.search(tail):
-                tail = self._raw.pop() + " " + tail
-                self._cleaned.pop()
-            first = not self._raw
-            self._cleaned.append(
-                self._cleaner.clean(
-                    tail,
-                    context=self._chunk_context(first),
-                    surrounding=self._chunk_surrounding(first=first, last=True),
-                    reformat=False,  # per-chunk; list is built once below
-                )
-            )
-        log.info(
-            "Live cleanup: %d sentence(s) pre-cleaned, tail %d chars",
-            len(self._cleaned) - (1 if tail else 0), len(tail),
-        )
+        self._thread.join()
+        remaining = self._session.remaining_sentences(self._source())
+        for i, sent in enumerate(remaining):
+            self._clean_one(sent, last=(i == len(remaining) - 1))
+        log.info("Live cleanup: %d sentence(s) assembled", len(self._cleaned))
         assembled = " ".join(p for p in self._cleaned if p).strip()
         # Streaming cleans one sentence at a time, so an enumeration dictated
         # with pauses ("...three ways. Firstly, I'll X. Secondly, I'll Y.")

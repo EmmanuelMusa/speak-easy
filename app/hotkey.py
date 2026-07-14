@@ -151,7 +151,8 @@ class PushToTalkApp:
                 source = self.cfg.cleanup.punctuation_source
                 fallback_full = None
                 if session is not None:
-                    raw = session.finish(audio)
+                    raw = session.finish(audio, source)
+                    fallback_full = session.fallback_text()
                 else:
                     tr = self.transcriber.transcribe(audio)
                     raw = tr.model_text(source)
