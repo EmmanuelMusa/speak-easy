@@ -127,9 +127,6 @@ class StreamingSession:
                     self._committed[-1] = append_gap_punctuation(
                         before, (base + start) - self._prev_end_abs
                     )
-                    if self._committed[-1] is not before and \
-                            self._committed[-1].endswith("."):
-                        text = text[0].upper() + text[1:]
                 self._committed.append(text)
             self._prev_end_abs = base + end
 

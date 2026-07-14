@@ -109,7 +109,7 @@ def test_long_pause_becomes_full_stop_across_commits():
     s._pass_once()
     buf["dur"] = 8.0
     s._pass_once()
-    assert s._committed == ["we should ship it.", "Also the docs need a pass"]
+    assert s._committed == ["we should ship it.", "also the docs need a pass"]
 
 
 def test_finish_without_commits_degrades_to_batch():
