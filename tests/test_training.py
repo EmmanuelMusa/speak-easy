@@ -116,23 +116,48 @@ def test_learned_vocab_merged_into_prompt(tmp_path):
 def test_feedback_event_dispatch():
     ov = Overlay(enabled=False)
     got = {}
-    ov.on_feedback = lambda raw, out, verdict, ideal: got.update(
-        raw=raw, out=out, verdict=verdict, ideal=ideal
+    ov.on_feedback = lambda raw, out, rating, transcript, ideal, tags: got.update(
+        raw=raw, out=out, rating=rating, transcript=transcript, ideal=ideal, tags=tags
     )
-    ov._pending[1] = ("raw text", "typed text")
-    ov._dispatch({"type": "feedback", "id": 1, "verdict": "bad", "ideal": "better text"})
-    assert got == {"raw": "raw text", "out": "typed text",
-                   "verdict": "bad", "ideal": "better text"}
+    ov._pending = (1, "raw text", "typed text")
+    ov._dispatch({"type": "feedback", "id": 1, "rating": 2,
+                  "transcript": "raw truth", "ideal": "better text",
+                  "tags": ["wrong punctuation"]})
+    assert got == {"raw": "raw text", "out": "typed text", "rating": 2,
+                   "transcript": "raw truth", "ideal": "better text",
+                   "tags": ["wrong punctuation"]}
+    assert ov._pending is None
 
 
-def test_feedback_timeout_not_recorded():
+def test_feedback_rating_only_dispatch():
+    ov = Overlay(enabled=False)
+    seen = []
+    ov.on_feedback = lambda *a: seen.append(a)
+    ov._pending = (3, "raw", "out")
+    ov._dispatch({"type": "feedback", "id": 3, "rating": 5,
+                  "transcript": None, "ideal": None, "tags": []})
+    assert seen == [("raw", "out", 5, None, None, [])]
+
+
+def test_feedback_dismiss_not_recorded():
     ov = Overlay(enabled=False)
     calls = []
     ov.on_feedback = lambda *a: calls.append(a)
-    ov._pending[2] = ("raw", "out")
-    ov._dispatch({"type": "feedback", "id": 2, "verdict": "timeout"})
+    ov._pending = (2, "raw", "out")
+    ov._dispatch({"type": "feedback", "id": 2, "rating": None,
+                  "transcript": None, "ideal": None, "tags": []})
     assert calls == []
-    assert 2 not in ov._pending  # pending entry cleaned up
+    assert ov._pending is None  # slot cleared on the matching id
+
+
+def test_feedback_stale_id_ignored():
+    ov = Overlay(enabled=False)
+    calls = []
+    ov.on_feedback = lambda *a: calls.append(a)
+    ov._pending = (5, "raw", "out")
+    ov._dispatch({"type": "feedback", "id": 4, "rating": 3})  # mismatched id
+    assert calls == []
+    assert ov._pending == (5, "raw", "out")  # untouched
 
 
 def test_settings_event_dispatch():

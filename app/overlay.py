@@ -34,10 +34,10 @@ class Overlay:
         self._lock = threading.Lock()
         self._settings: dict = {}
         self._feedback_id = 0
-        self._pending: dict[int, tuple[str, str]] = {}  # id -> (raw, output)
+        self._pending: tuple[int, str, str] | None = None  # (id, raw, output)
         #: callbacks the app assigns
         self.on_settings = None   # fn(values: dict)
-        self.on_feedback = None   # fn(raw, output, verdict, ideal)
+        self.on_feedback = None   # fn(raw, output, rating, transcript, ideal, tags)
         self.on_quit = None       # fn() — user hit Quit in the settings dialog
 
     # -- public API (thread-safe) -----------------------------------------
@@ -74,15 +74,16 @@ class Overlay:
             self._send("settings " + json.dumps(values))
 
     def request_feedback(self, raw: str, output: str) -> None:
-        """Show the training-mode thumbs panel for the latest dictation."""
+        """Show the training-mode feedback panel for the latest dictation.
+        Only one panel is live at a time, so a single pending slot suffices."""
         if not self.enabled:
             return
         self._ensure_proc()
         self._feedback_id += 1
-        self._pending[self._feedback_id] = (raw, output)
+        self._pending = (self._feedback_id, raw, output)
         self._send(
             "feedback "
-            + json.dumps({"id": self._feedback_id, "preview": output})
+            + json.dumps({"id": self._feedback_id, "raw": raw, "cleaned": output})
         )
 
     # -- internals ----------------------------------------------------------
@@ -155,9 +156,15 @@ class Overlay:
         elif kind == "settings_saved" and self.on_settings:
             self.on_settings(event.get("values", {}))
         elif kind == "feedback":
-            pending = self._pending.pop(event.get("id"), None)
-            verdict = event.get("verdict")
-            # Timeouts are ignored: only explicit feedback becomes data.
-            if pending and verdict in ("ok", "bad") and self.on_feedback:
-                raw, output = pending
-                self.on_feedback(raw, output, verdict, event.get("ideal"))
+            pending = self._pending
+            if pending is None or pending[0] != event.get("id"):
+                return  # stale/superseded id — ignore
+            self._pending = None
+            # An answer carries a rating or an ideal correction; a dismiss
+            # (Cancel / closed unanswered) carries neither and is not recorded.
+            if (event.get("rating") is not None or event.get("ideal")) and self.on_feedback:
+                _id, raw, output = pending
+                self.on_feedback(
+                    raw, output, event.get("rating"), event.get("transcript"),
+                    event.get("ideal"), event.get("tags") or [],
+                )
