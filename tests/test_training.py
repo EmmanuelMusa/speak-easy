@@ -380,3 +380,28 @@ def test_record_without_audio_path_is_null(tmp_path):
     store = make_store(tmp_path)
     store.record("raw", "Out.", "ok", rating=5)
     assert store._all_entries()[-1]["audio"] is None
+
+
+def test_record_feedback_saves_audio_on_transcript():
+    from app.hotkey import PushToTalkApp
+    fake = MagicMock()
+    fake.cfg.training.save_correction_audio = True
+    fake.cfg.training.replace_on_correction = False
+    fake._last_audio = ("AUDIO", 16000)
+    fake.training.save_audio.return_value = "training_audio/1.wav"
+    PushToTalkApp._record_feedback(fake, "raw", "out", 3, "raw true", None, [])
+    fake.training.save_audio.assert_called_once_with("AUDIO", 16000)
+    assert fake.training.record.call_args.kwargs["audio_path"] == "training_audio/1.wav"
+    assert fake._last_audio is None  # stash cleared
+
+
+def test_record_feedback_no_audio_without_transcript():
+    from app.hotkey import PushToTalkApp
+    fake = MagicMock()
+    fake.cfg.training.save_correction_audio = True
+    fake.cfg.training.replace_on_correction = False
+    fake._last_audio = ("AUDIO", 16000)
+    PushToTalkApp._record_feedback(fake, "raw", "out", 5, None, None, [])
+    fake.training.save_audio.assert_not_called()
+    assert fake.training.record.call_args.kwargs["audio_path"] is None
+    assert fake._last_audio is None

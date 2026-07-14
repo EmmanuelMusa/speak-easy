@@ -85,6 +85,10 @@ class TrainingConfig:
     # After a thumbs-down correction, also replace the text already typed
     # into the focused app (guarded: skipped if you've edited it since).
     replace_on_correction: bool = True
+    # When a correction includes what you actually said, also save that
+    # dictation's audio (into training_audio/, gitignored) as a training pair
+    # for a future speech-model fine-tune. Off = text-only training / privacy.
+    save_correction_audio: bool = True
 
 
 @dataclass

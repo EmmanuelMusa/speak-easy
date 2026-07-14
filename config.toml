@@ -73,6 +73,10 @@ max_examples = 5
 # After thumbs-down, also fix the text already typed into the app (only if
 # you haven't edited it since — otherwise it's left alone).
 replace_on_correction = true
+# When a correction includes what you actually said, also save that dictation's
+# audio (into training_audio/, gitignored) so a later run can fine-tune the
+# speech model to your voice. Turn off for text-only training / privacy.
+save_correction_audio = true
 
 [context]
 # Carry recent dictations into the next one as reference for the cleanup

@@ -4,3 +4,4 @@ __pycache__/
 .pytest_cache/
 training_data.jsonl
 learned_vocab.json
+training_audio/

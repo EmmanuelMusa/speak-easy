@@ -78,6 +78,7 @@ class PushToTalkApp:
         self._live: LiveCleanup | None = None
         self._surrounding: focus.Surrounding | None = None
         self._press_gen = 0  # invalidates surrounding reads from older presses
+        self._last_audio: tuple | None = None  # (audio, sr) held for correction capture
 
     # -- hotkey callbacks ------------------------------------------------
 
@@ -187,6 +188,7 @@ class PushToTalkApp:
                     cleaned,
                 )
                 if self.cfg.training.enabled:
+                    self._last_audio = (audio, self.cfg.audio.sample_rate)
                     self.overlay.request_feedback(raw, cleaned)
             finally:
                 self.overlay.show_idle()
@@ -195,17 +197,24 @@ class PushToTalkApp:
 
     def _record_feedback(self, raw: str, output: str, rating, transcript,
                          ideal, tags) -> None:
+        audio_path = None
+        stash, self._last_audio = self._last_audio, None
+        if transcript and self.cfg.training.save_correction_audio and stash is not None:
+            audio, sr = stash
+            audio_path = self.training.save_audio(audio, sr)
         # verdict retained only for the stored schema / legacy few-shot.
         verdict = "ok" if (rating == 5 and not ideal) else "bad"
         self.training.record(
             raw, output, verdict, ideal,
-            rating=rating, transcript=transcript, tags=tags,
+            rating=rating, transcript=transcript, tags=tags, audio_path=audio_path,
         )
         if not ideal:
-            log.info("Feedback: rating %s%s", rating,
-                     f", tags {tags}" if tags else "")
+            log.info("Feedback: rating %s%s%s", rating,
+                     f", tags {tags}" if tags else "",
+                     " + audio" if audio_path else "")
             return
-        log.info("Correction saved (rating %s)", rating)
+        log.info("Correction saved (rating %s)%s", rating,
+                 " + audio" if audio_path else "")
         # The corrected text is what should inform the next dictation.
         self.context.replace_last(ideal)
         if self.cfg.training.replace_on_correction:
