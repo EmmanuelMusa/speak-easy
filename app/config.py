@@ -117,7 +117,7 @@ class AudioConfig:
     channels: int = 1
     # Play a subtle low tone when recording starts (hotkey pressed).
     start_sound: bool = True
-    start_sound_volume: float = 0.18  # 0.0-1.0, kept low on purpose
+    start_sound_volume: float = 0.3  # 0.0-1.0, soft confirmation cue
 
 
 @dataclass

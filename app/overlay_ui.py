@@ -34,9 +34,9 @@ IDLE_ALPHA = 120
 ACTIVE_ALPHA = 216
 CHIP_ALPHA = 238
 
-# Pill footprint per state (width, height). Smaller, tighter visualizer.
-DIMS = {"idle": (46, 5), "recording": (104, 20), "processing": (104, 20),
-        "hide": (46, 5)}
+# Pill footprint per state (width, height). Compact, tighter visualizer.
+DIMS = {"idle": (44, 5), "recording": (94, 18), "processing": (94, 18),
+        "hide": (44, 5)}
 CANVAS_W, CANVAS_H = 150, 44
 PILL_CY = CANVAS_H / 2             # everything is vertically centered now
 
@@ -45,7 +45,8 @@ PILL_CY = CANVAS_H / 2             # everything is vertically centered now
 CHIP_W, CHIP_H = 122, 30
 GEAR_D = 16                        # settings-gear diameter inside the chip
 HOVER_GRACE_S = 0.5               # chip lingers briefly after the mouse leaves
-BARS = 11
+BARS = 15                          # finer resolution than before (was 11)
+BAR_W = 2.4                        # crisp pill-shaped bar width
 
 STT_MODELS = ["tiny.en", "base", "small.en", "medium", "large-v3"]
 OLLAMA_MODELS = ["llama3.1:8b", "llama3.2:3b", "phi3:mini", "mistral:7b"]
@@ -350,12 +351,13 @@ def main() -> int:
                     weight = 1.0 - abs(i - mid) / (mid + 1.0) * 0.5
                     target = 0.10 + 0.90 * self.history[-1 - i] * weight
                 elif self.state == "processing":
-                    # Gentle, slow travelling wave — calmer than before.
-                    target = 0.30 + 0.30 * math.sin(self.t * 3.4 + i * 0.55)
-                    target *= 1.0 - abs(i - mid) / (mid + 1.0) * 0.45
+                    # Gentle, slow travelling wave — calm and symmetric.
+                    target = 0.28 + 0.24 * math.sin(self.t * 3.0 + i * 0.45)
+                    target *= 1.0 - abs(i - mid) / (mid + 1.0) * 0.40
                 else:
                     target = 0.0
-                self.heights[i] += (target - self.heights[i]) * 0.28
+                # Slightly gentler easing than before -> smoother, less jittery.
+                self.heights[i] += (target - self.heights[i]) * 0.22
             self.setVisible(self.state != "hide")
             self.update()
 
@@ -393,28 +395,30 @@ def main() -> int:
                 p.setBrush(QtCore.Qt.NoBrush)
                 p.drawRoundedRect(rect, radius, radius)
 
-            # Waveform (fades out as the chip takes over).
-            if self.state in ("recording", "processing") and self.h > 12 \
+            # Waveform: crisp pill-shaped bars (filled rounded rects) rather than
+            # soft stroked lines — sharper, more solid, and reads like a hi-res
+            # level meter. Fades out as the settings chip takes over.
+            if self.state in ("recording", "processing") and self.h > 11 \
                     and r < 0.35:
                 p.save()
                 p.setOpacity(1.0 - r / 0.35)
-                pen = QtGui.QPen(QtGui.QColor(*BAR_RGBA))
-                pen.setWidthF(2.0)
-                pen.setCapStyle(QtCore.Qt.RoundCap)
-                inner = self.w - self.h - 8
+                p.setPen(QtCore.Qt.NoPen)
+                inner = self.w - self.h - 6
                 step = inner / (BARS - 1)
-                max_bar = self.h - 7
+                max_bar = self.h - 6
                 x0 = cx - inner / 2
+                mid = (BARS - 1) / 2
                 for i in range(BARS):
-                    bar_h = max(1.6, self.heights[i] * max_bar)
+                    bar_h = max(BAR_W, self.heights[i] * max_bar)
                     x = x0 + i * step
-                    edge = 1.0 - abs(i - (BARS - 1) / 2) / ((BARS - 1) / 2) * 0.4
+                    edge = 1.0 - abs(i - mid) / mid * 0.30  # gentle end taper
                     c = QtGui.QColor(*BAR_RGBA)
                     c.setAlphaF(c.alphaF() * edge)
-                    pen.setColor(c)
-                    p.setPen(pen)
-                    p.drawLine(QtCore.QPointF(x, cy - bar_h / 2),
-                               QtCore.QPointF(x, cy + bar_h / 2))
+                    p.setBrush(c)
+                    p.drawRoundedRect(
+                        QtCore.QRectF(x - BAR_W / 2, cy - bar_h / 2, BAR_W, bar_h),
+                        BAR_W / 2, BAR_W / 2,
+                    )
                 p.restore()
 
             # Settings chip contents: vector gear + "Settings" label.

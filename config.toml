@@ -99,4 +99,4 @@ channels = 1
 # Play a subtle low tone the moment recording starts (hotkey pressed), so you
 # get non-visual confirmation the press registered.
 start_sound = true
-start_sound_volume = 0.18
+start_sound_volume = 0.3
