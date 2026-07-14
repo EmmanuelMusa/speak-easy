@@ -800,6 +800,8 @@ def main() -> int:
             self.cleaned = str(req.get("cleaned", ""))
             self.answered = False
             self._expanded = False
+            self._drag_from = None       # cursor→top-left offset while dragging
+            self._user_moved = False     # once dragged, keep the user's spot
 
             self._root = QtWidgets.QVBoxLayout(self)
             self._root.setContentsMargins(15, 13, 15, 13)
@@ -824,14 +826,49 @@ def main() -> int:
             self._root.addLayout(self._strip)
 
             self.adjustSize()
-            self._reposition()
+            self._place()
 
-        # -- geometry ------------------------------------------------------
-        def _reposition(self):
+        # -- geometry / drag -----------------------------------------------
+        def _avail(self):
+            scr = self.screen() or QtWidgets.QApplication.primaryScreen()
+            return scr.availableGeometry()
+
+        def _place(self):
+            """Sit in the bottom-right (out of the centre text area) and clamp
+            fully on-screen. Once the user drags the panel, keep their spot and
+            only clamp so it can't run off-screen as it grows/shrinks."""
             self.adjustSize()
-            g = self._bar.geometry()
-            self.move(g.center().x() - self.width() // 2,
-                      g.top() - self.height() - 8)
+            if not self._user_moved:
+                a = self._avail()
+                m = 16
+                self.move(a.right() - self.width() - m,
+                          a.bottom() - self.height() - m)
+            self._clamp()
+
+        def _clamp(self):
+            a = self._avail()
+            m = 8
+            x = min(max(self.x(), a.left() + m), a.right() - self.width() - m)
+            y = min(max(self.y(), a.top() + m), a.bottom() - self.height() - m)
+            self.move(int(x), int(y))
+
+        # Drag the panel anywhere: press on its body (not on the stars, tags,
+        # buttons or text fields, which handle their own clicks) and move.
+        def mousePressEvent(self, event):
+            if event.button() == QtCore.Qt.LeftButton:
+                self._drag_from = (event.globalPosition().toPoint()
+                                   - self.frameGeometry().topLeft())
+                event.accept()
+
+        def mouseMoveEvent(self, event):
+            if self._drag_from is not None and (
+                    event.buttons() & QtCore.Qt.LeftButton):
+                self._user_moved = True
+                self.move(event.globalPosition().toPoint() - self._drag_from)
+                event.accept()
+
+        def mouseReleaseEvent(self, event):
+            self._drag_from = None
 
         # -- collapsed fast path -------------------------------------------
         def _quick_rate(self, n: int):
@@ -920,7 +957,7 @@ def main() -> int:
 
             # Now the panel may take focus so the fields are editable.
             self.setWindowFlag(QtCore.Qt.WindowDoesNotAcceptFocus, False)
-            self._reposition()
+            self._place()
             self.show()
             self.activateWindow()
             self._actual.setFocus()
