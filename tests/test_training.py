@@ -369,6 +369,29 @@ def test_save_audio_empty_returns_none(tmp_path):
     assert store.save_audio(np.array([], dtype=np.float32), 16000) is None
 
 
+def test_save_audio_returns_none_on_write_error(tmp_path, monkeypatch):
+    import app.training as training_mod
+    store = make_store(tmp_path)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(training_mod.wave, "open", boom)
+    assert store.save_audio(np.array([0.1, 0.2], dtype=np.float32), 16000) is None
+
+
+def test_save_audio_unique_filenames(tmp_path, monkeypatch):
+    import app.training as training_mod
+    store = make_store(tmp_path)
+    monkeypatch.setattr(training_mod.time, "time", lambda: 1000.0)  # freeze -> same ms
+    a = np.array([0.1, 0.2], dtype=np.float32)
+    p1 = store.save_audio(a, 16000)
+    p2 = store.save_audio(a, 16000)
+    assert p1 and p2 and p1 != p2  # no silent overwrite even in the same millisecond
+    assert (store.audio_dir.parent / p1).exists()
+    assert (store.audio_dir.parent / p2).exists()
+
+
 def test_record_stores_audio_path(tmp_path):
     store = make_store(tmp_path)
     store.record("raw", "Out.", "bad", "Ideal.", transcript="raw truth",

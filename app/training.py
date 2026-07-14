@@ -182,9 +182,15 @@ class TrainingStore:
             if audio is None or len(audio) == 0:
                 return None
             self.audio_dir.mkdir(parents=True, exist_ok=True)
-            name = f"{int(time.time() * 1000)}.wav"
+            stamp = int(time.time() * 1000)
+            name = f"{stamp}.wav"
             path = self.audio_dir / name
-            pcm = (audio.clip(-1.0, 1.0) * 32767.0).astype("<i2")
+            i = 1
+            while path.exists():
+                name = f"{stamp}_{i}.wav"
+                path = self.audio_dir / name
+                i += 1
+            pcm = (audio.clip(-1.0, 1.0) * 32767.0).round().astype("<i2")
             with wave.open(str(path), "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
