@@ -428,3 +428,14 @@ def test_record_feedback_no_audio_without_transcript():
     fake.training.save_audio.assert_not_called()
     assert fake.training.record.call_args.kwargs["audio_path"] is None
     assert fake._last_audio is None
+
+
+def test_trainable_pair_count(tmp_path):
+    store = make_store(tmp_path)
+    store.record("a", "A.", "bad", "Ideal.", transcript="a said",
+                 audio_path="training_audio/1.wav")            # pair
+    store.record("b", "B.", "bad", "Ideal.", transcript="b said")  # no audio -> not a pair
+    store.record("c", "C.", "ok", rating=5)                    # neither
+    store.record("d", "D.", "bad", "Ideal.", transcript="d said",
+                 audio_path="training_audio/2.wav")            # pair
+    assert store.trainable_pair_count() == 2

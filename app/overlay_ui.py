@@ -307,6 +307,14 @@ def main() -> int:
                 d.grab().save(arg)
                 d.deleteLater()
                 emit({"type": "shot_ok"})
+            elif cmd == "shotreview":  # debug: screenshot the review dashboard
+                d = ReviewDialog(int(self.settings.get("target_pairs", 200)))
+                d.refresh()
+                d.ensurePolished()
+                d.resize(d.sizeHint())
+                d.grab().save(arg)
+                d.deleteLater()
+                emit({"type": "shot_ok"})
 
         # -- animation ------------------------------------------------------
 
@@ -562,8 +570,10 @@ def main() -> int:
             self.hide()
 
         def _open_review(self):
+            target = getattr(self, "_target", 200)
             if self._review_dialog is None:
-                self._review_dialog = ReviewDialog()
+                self._review_dialog = ReviewDialog(target)
+            self._review_dialog.target = max(1, int(target))
             self._review_dialog.refresh()
             self._review_dialog.show()
             self._review_dialog.raise_()
@@ -577,6 +587,7 @@ def main() -> int:
             self.ollama_model.setCurrentText(str(values.get("ollama_model", "llama3.1:8b")))
             self.cleanup.setChecked(bool(values.get("cleanup_enabled", True)))
             self.delivery.setCurrentText(str(values.get("delivery_method", "clipboard")))
+            self._target = int(values.get("target_pairs", 200))
 
         def _save(self):
             emit({
@@ -600,12 +611,13 @@ def main() -> int:
         examples and auto-learned vocabulary. Edits the same files the app
         reads, so changes take effect on the next dictation."""
 
-        def __init__(self):
+        def __init__(self, target_pairs: int = 200):
             super().__init__(None, QtCore.Qt.WindowStaysOnTopHint)
             self.setWindowTitle("Review learnings")
             self.setObjectName("root")
             self.setStyleSheet(DIALOG_QSS)
-            self.setMinimumSize(470, 430)
+            self.setMinimumSize(470, 470)
+            self.target = max(1, int(target_pairs))
             from .training import TrainingStore
             self.store = TrainingStore()
 
@@ -616,6 +628,30 @@ def main() -> int:
             title = QtWidgets.QLabel("Review learnings")
             title.setObjectName("title")
             outer.addWidget(title)
+
+            pairs_lbl = QtWidgets.QLabel("VOICE TRAINING DATA")
+            pairs_lbl.setProperty("role", "section")
+            pairs_lbl.setToolTip(
+                "(audio, what-you-actually-said) pairs saved for a future "
+                "voice fine-tune")
+            outer.addWidget(pairs_lbl)
+            self.pairs_count = QtWidgets.QLabel()
+            self.pairs_count.setStyleSheet(
+                "color:#ffffff;font-size:15px;font-weight:700;")
+            outer.addWidget(self.pairs_count)
+            self.pairs_bar = QtWidgets.QProgressBar()
+            self.pairs_bar.setTextVisible(False)
+            self.pairs_bar.setFixedHeight(8)
+            self.pairs_bar.setStyleSheet(
+                "QProgressBar{background:#232327;border:1px solid #33333a;"
+                "border-radius:5px;}"
+                "QProgressBar::chunk{background:#6e96ff;border-radius:5px;}")
+            outer.addWidget(self.pairs_bar)
+            self.pairs_hint = QtWidgets.QLabel()
+            self.pairs_hint.setObjectName("subtitle")
+            self.pairs_hint.setWordWrap(True)
+            outer.addWidget(self.pairs_hint)
+            outer.addSpacing(4)
 
             corr_lbl = QtWidgets.QLabel("CORRECTION EXAMPLES")
             corr_lbl.setProperty("role", "section")
@@ -657,6 +693,16 @@ def main() -> int:
             listw.setItemWidget(item, row)
 
         def refresh(self):
+            n = self.store.trainable_pair_count()
+            self.pairs_count.setText(f"{n} / {self.target} pairs")
+            self.pairs_bar.setMaximum(self.target)
+            self.pairs_bar.setValue(min(n, self.target))
+            if n >= self.target:
+                self.pairs_hint.setText("Ready to fine-tune your voice.")
+            else:
+                self.pairs_hint.setText(
+                    f"{self.target - n} more corrections with “what you actually "
+                    "said” to reach the fine-tuning target.")
             self.corr_list.clear()
             self.vocab_list.clear()
             for e in reversed(self.store.corrections(n=None)):

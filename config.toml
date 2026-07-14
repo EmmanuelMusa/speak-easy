@@ -77,6 +77,9 @@ replace_on_correction = true
 # audio (into training_audio/, gitignored) so a later run can fine-tune the
 # speech model to your voice. Turn off for text-only training / privacy.
 save_correction_audio = true
+# Target number of (audio, what-you-said) pairs before a voice fine-tune is
+# worth attempting — shown as a progress bar in the Review panel.
+target_pairs = 200
 
 [context]
 # Carry recent dictations into the next one as reference for the cleanup

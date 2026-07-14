@@ -221,6 +221,14 @@ class TrainingStore:
         found = [e for e in self._all_entries() if e.get("ideal")]
         return found if n is None else found[-n:]
 
+    def trainable_pair_count(self) -> int:
+        """Number of entries that form a usable acoustic-training pair — both a
+        saved audio clip and a verbatim transcript (what Sub-project B consumes)."""
+        return sum(
+            1 for e in self._all_entries()
+            if e.get("audio") and e.get("transcript")
+        )
+
     def delete_correction(self, ts) -> None:
         """Remove the correction with the given timestamp (undo a lesson)."""
         kept = [e for e in self._all_entries() if e.get("ts") != ts]

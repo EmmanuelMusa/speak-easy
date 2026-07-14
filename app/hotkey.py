@@ -235,6 +235,7 @@ class PushToTalkApp:
             "ollama_model": self.cfg.cleanup.ollama_model,
             "cleanup_enabled": self.cfg.cleanup.enabled,
             "delivery_method": self.cfg.injection.delivery_method,
+            "target_pairs": self.cfg.training.target_pairs,
         }
 
     def _apply_settings(self, values: dict) -> None:
@@ -379,6 +380,13 @@ class PushToTalkApp:
             "Quit button in settings to quit.",
             self.cfg.hotkey.binding,
         )
+        if self.cfg.training.enabled and self.cfg.training.save_correction_audio:
+            n, t = self.training.trainable_pair_count(), self.cfg.training.target_pairs
+            if n >= t:
+                log.info("Acoustic training data: %d/%d pairs — ready to fine-tune.", n, t)
+            else:
+                log.info("Acoustic training data: %d/%d pairs (%d more to start "
+                         "fine-tuning your voice).", n, t, t - n)
         try:
             while not self._quit.wait(0.5):
                 pass

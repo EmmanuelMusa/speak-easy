@@ -89,6 +89,9 @@ class TrainingConfig:
     # dictation's audio (into training_audio/, gitignored) as a training pair
     # for a future speech-model fine-tune. Off = text-only training / privacy.
     save_correction_audio: bool = True
+    # How many (audio, transcript) pairs to aim for before a voice fine-tune is
+    # worth attempting — a progress target shown in the Review panel.
+    target_pairs: int = 200
 
 
 @dataclass
