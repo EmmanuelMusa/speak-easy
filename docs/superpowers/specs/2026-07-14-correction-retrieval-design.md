@@ -29,7 +29,12 @@ name/jargon word like "Ogiop") drive the match while shared filler ("the",
 "and") barely counts — well matched to how dictation corrections recur.
 
 **Algorithm (deterministic, pure-Python, offline):**
-- Tokenize: `re.findall(r"[a-z0-9']+", text.lower())`.
+- Tokenize into **content words**: `re.findall(r"[a-z0-9']+", text.lower())` minus
+  the common-word stoplist (`_COMMON_WORDS`, shared with vocab mining). Stripping
+  stopwords stops a shared function word ("yes", "the") from driving a match — which
+  would otherwise over-fire on short streamed sentence chunks like "Yes.". A query
+  with fewer than 2 content words is treated as too weak to judge and retrieves
+  nothing.
 - Corpus = the `raw` text of every correction (each is one document); `N` = count.
 - Document frequency `df(t)` = number of documents containing term `t`.
 - `idf(t) = log((1 + N) / (1 + df(t))) + 1` (smoothed; safe for df=0/df=N).
@@ -109,3 +114,6 @@ across the `model`/`pauses` punctuation modes.
   usually recur through shared terms, and a wrong match is worse than a miss.
 - The threshold is a fixed heuristic; if it proves too strict/loose in real use it
   is a one-line constant change (or a later config key).
+- Streaming queries a single sentence chunk at a time, so short chunks carry little
+  signal; the stopword filter + 2-content-word minimum handle the common short
+  fillers, and anything below that simply retrieves nothing (safe default).
