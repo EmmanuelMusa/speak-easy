@@ -80,23 +80,35 @@ class TrainingStore:
 
     # -- recording -----------------------------------------------------------
 
-    def record(self, raw: str, output: str, verdict: str, ideal: str | None = None) -> None:
-        """Append one feedback entry; mine vocabulary on negative feedback."""
+    def record(self, raw: str, output: str, verdict: str, ideal: str | None = None,
+               *, rating: int | None = None, transcript: str | None = None,
+               tags: list[str] | None = None) -> None:
+        """Append one feedback entry and mine vocabulary. `verdict` is kept for
+        backward compatibility; `rating` (1-5), `transcript` (what the user
+        actually said) and `tags` are the richer signal. Mines TWO diffs: the
+        cleanup fix (output -> ideal) and the STT mishear (raw -> transcript),
+        both through the gated _mine_vocab so only genuine terms are learned."""
         entry = {
             "ts": time.time(),
             "raw": raw,
             "output": output,
-            "verdict": verdict,          # "ok" | "bad"
+            "rating": rating,
+            "transcript": transcript or None,
             "ideal": ideal or None,
+            "tags": list(tags) if tags else [],
+            "verdict": verdict,          # "ok" | "bad" (derived, kept for compat)
         }
         with self._lock:
             with open(self.data_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        if verdict == "bad" and ideal and ideal.strip() and ideal.strip() != output.strip():
-            learned = self._mine_vocab(output, ideal)
-            if learned:
-                self._add_vocab(learned)
-                log.info("Learned vocabulary: %s", learned)
+        learned: list[str] = []
+        if ideal and ideal.strip() and ideal.strip() != output.strip():
+            learned += self._mine_vocab(output, ideal)
+        if transcript and transcript.strip() and transcript.strip() != raw.strip():
+            learned += self._mine_vocab(raw, transcript)
+        if learned:
+            self._add_vocab(learned)
+            log.info("Learned vocabulary: %s", learned)
 
     # -- few-shot corrections ---------------------------------------------
 
@@ -113,12 +125,9 @@ class TrainingStore:
         return entries
 
     def corrections(self, n: int | None = 5) -> list[dict]:
-        """Negative feedback entries that carry an ideal text (most recent
+        """Feedback entries that carry an ideal-cleanup correction (most recent
         `n`, or all if n is None)."""
-        found = [
-            e for e in self._all_entries()
-            if e.get("verdict") == "bad" and e.get("ideal")
-        ]
+        found = [e for e in self._all_entries() if e.get("ideal")]
         return found if n is None else found[-n:]
 
     def delete_correction(self, ts) -> None:

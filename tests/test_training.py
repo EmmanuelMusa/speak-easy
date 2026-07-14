@@ -162,3 +162,40 @@ def test_save_config_updates_preserves_comments(tmp_path):
     assert cfg.stt.model == "large-v3"
     assert cfg.training.enabled is True
     assert cfg.hotkey.binding == "f8"  # new section appended
+
+
+def test_record_persists_rating_transcript_tags(tmp_path):
+    store = make_store(tmp_path)
+    store.record("raw truth", "Out.", "bad", "Ideal.", rating=2,
+                 transcript="raw truth fixed", tags=["wrong punctuation", "misheard word"])
+    e = store._all_entries()[-1]
+    assert e["rating"] == 2
+    assert e["transcript"] == "raw truth fixed"
+    assert e["tags"] == ["wrong punctuation", "misheard word"]
+    assert e["ideal"] == "Ideal."
+
+
+def test_tags_default_to_empty_and_optional_fields_null(tmp_path):
+    store = make_store(tmp_path)
+    store.record("raw", "Out.", "ok", rating=5)
+    e = store._all_entries()[-1]
+    assert e["tags"] == []
+    assert e["rating"] == 5
+    assert e["transcript"] is None
+
+
+def test_stt_mishear_vocab_mined_from_transcript(tmp_path):
+    store = make_store(tmp_path)
+    # STT misheard the name; the true transcript carries the right spelling.
+    store.record("meet with mr ogi up", "Meet with Mr Ogi up.", "bad",
+                 ideal=None, transcript="meet with Mr Ogiop")
+    assert "Ogiop" in store.learned_vocab()
+
+
+def test_corrections_filter_by_ideal_not_verdict(tmp_path):
+    store = make_store(tmp_path)
+    store.record("a", "A.", "ok", rating=5)              # no ideal -> not a correction
+    store.record("b", "B.", "bad", "Bravo.", rating=2)   # ideal -> correction
+    corr = store.corrections(n=None)
+    assert len(corr) == 1
+    assert corr[0]["ideal"] == "Bravo."
