@@ -77,9 +77,12 @@ def _dry_run(cfg, wav_path: str) -> int:
         return 2
 
     print(f"[dry-run] transcribing {wav} (model={cfg.stt.model}, VAD on)...")
-    raw = Transcriber(cfg.stt).transcribe(wav)
-    print(f"[dry-run] raw transcript : {raw!r}")
-    cleaned = Cleaner(cfg.cleanup).clean(raw)
+    tr = Transcriber(cfg.stt).transcribe(wav)
+    source = cfg.cleanup.punctuation_source
+    print(f"[dry-run] raw transcript : {tr.model_text(source)!r}")
+    cleaned = Cleaner(cfg.cleanup).clean(
+        tr.model_text(source), fallback_text=tr.fallback_text
+    )
     print(f"[dry-run] cleaned output : {cleaned!r}")
     return 0
 

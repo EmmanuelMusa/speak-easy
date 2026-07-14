@@ -148,10 +148,14 @@ class PushToTalkApp:
             try:
                 t0 = time.perf_counter()
                 has_before = surrounding is not None and surrounding.before.strip()
+                source = self.cfg.cleanup.punctuation_source
+                fallback_full = None
                 if session is not None:
                     raw = session.finish(audio)
                 else:
-                    raw = self.transcriber.transcribe(audio)
+                    tr = self.transcriber.transcribe(audio)
+                    raw = tr.model_text(source)
+                    fallback_full = tr.fallback_text
                 t_stt = time.perf_counter()
                 if not raw:
                     log.info("No speech detected.")
@@ -164,6 +168,7 @@ class PushToTalkApp:
                 else:
                     cleaned = self.cleaner.clean(
                         raw,
+                        fallback_text=fallback_full,
                         context=None if has_before else self.context.cleanup_context(),
                         surrounding=surrounding,
                     )
