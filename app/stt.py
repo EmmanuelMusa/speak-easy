@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -99,20 +100,99 @@ def collapse_ellipses(text: str) -> str:
     return text.strip()
 
 
-def stitch_segments(segs: "list[tuple[float, float, str]]") -> str:
-    """Join segments, inserting pause-based punctuation at the gaps."""
+_TERMINAL_RE = re.compile(r"(?<![.\s][A-Za-z])[.?!]+\s*$")
+
+
+def ends_sentence(text: str) -> bool:
+    """True if `text` ends with terminal punctuation that is not part of a
+    single-letter abbreviation ("p.m.", "e.g.")."""
+    return bool(_TERMINAL_RE.search(text))
+
+
+def stitch(segs: "list[tuple[float, float, str]]") -> "tuple[list[str], list[str]]":
+    """Split segments into raw parts + the pause kind between each pair.
+    `boundaries[i]` is the pause between `parts[i]` and `parts[i+1]`."""
     parts: list[str] = []
+    boundaries: list[str] = []
     prev_end: float | None = None
     for start, end, text in segs:
         if text:
             if parts and prev_end is not None:
-                before = parts[-1]
-                parts[-1] = append_gap_punctuation(before, start - prev_end)
-                if parts[-1] is not before and parts[-1].endswith("."):
-                    text = text[0].upper() + text[1:]
+                boundaries.append(classify_gap(parts[-1], start - prev_end))
             parts.append(text)
         prev_end = end
-    return " ".join(parts).strip()
+    return parts, boundaries
+
+
+def resolve_fallback(parts: list[str], boundaries: list[str]) -> str:
+    """The pause-punctuated view (for the offline strip). Applies the pause
+    marks deterministically; does NOT force any capitalization."""
+    if not parts:
+        return ""
+    out = [parts[0]]
+    for i, kind in enumerate(boundaries):
+        if kind == "period":
+            if out[-1] and out[-1][-1].isalnum():
+                out[-1] += "."
+            elif out[-1].endswith(","):
+                out[-1] = out[-1][:-1] + "."
+        elif kind == "comma":
+            if out[-1] and out[-1][-1].isalnum():
+                out[-1] += ","
+        out.append(parts[i + 1])
+    return " ".join(out).strip()
+
+
+def resolve_model(parts: list[str], boundaries: list[str], source: str) -> str:
+    """The view the cleanup model receives. "model": words + Whisper
+    punctuation only (pause marks dropped so the model punctuates from
+    context). "pauses": the fallback view (A-B baseline / legacy)."""
+    if source == "pauses":
+        return resolve_fallback(parts, boundaries)
+    return " ".join(p for p in parts if p).strip()
+
+
+def split_into_sentences(
+    parts: list[str], boundaries: list[str]
+) -> "list[tuple[int, int]]":
+    """Inclusive `(start, end)` part-index ranges, one per sentence. A
+    sentence ends at part i when a `period` pause follows it or the part ends
+    with a Whisper terminal; the final part always closes the last sentence."""
+    sents: list[tuple[int, int]] = []
+    start = 0
+    n = len(parts)
+    for i in range(n):
+        end_here = ends_sentence(parts[i]) or (
+            i < len(boundaries) and boundaries[i] == "period"
+        )
+        if i == n - 1:
+            end_here = True
+        if end_here:
+            sents.append((start, i))
+            start = i + 1
+    return sents
+
+
+@dataclass
+class Transcript:
+    """A transcribed utterance as structured parts + pause boundaries, with
+    resolvers for the two views."""
+
+    parts: list
+    boundaries: list
+
+    def model_text(self, source: str) -> str:
+        return resolve_model(self.parts, self.boundaries, source)
+
+    @property
+    def fallback_text(self) -> str:
+        return resolve_fallback(self.parts, self.boundaries)
+
+
+def stitch_segments(segs: "list[tuple[float, float, str]]") -> str:
+    """Backwards-compatible fallback-view join (now without pause-forced
+    capitalization; casing is owned downstream)."""
+    return resolve_fallback(*stitch(segs))
 
 
 _dlls_registered = False
@@ -184,15 +264,11 @@ class Transcriber:
         self,
         audio: "np.ndarray | str | Path",
         initial_prompt: str | None = None,
-    ) -> str:
-        """Transcribe a mono float32 array (16 kHz) or an audio file path.
-
-        vad_filter=True runs Silero VAD inside faster-whisper to drop
-        silence/non-speech before decoding. Pauses between segments become
-        punctuation (see stitch_segments).
-        """
+    ) -> "Transcript":
+        """Transcribe a mono float32 array (16 kHz) or an audio file path,
+        returning a Transcript (structured parts + pause boundaries)."""
         segs = self.transcribe_segments(audio, initial_prompt=initial_prompt)
-        return stitch_segments(segs)
+        return Transcript(*stitch(segs))
 
     def transcribe_segments(
         self,
