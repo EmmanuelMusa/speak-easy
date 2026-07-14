@@ -139,6 +139,18 @@ def test_feedback_rating_only_dispatch():
     assert seen == [("raw", "out", 5, None, None, [])]
 
 
+def test_feedback_transcript_only_dispatch():
+    ov = Overlay(enabled=False)
+    seen = []
+    ov.on_feedback = lambda *a: seen.append(a)
+    ov._pending = (7, "meet mr ogi up", "Meet Mr Ogi up.")
+    ov._dispatch({"type": "feedback", "id": 7, "rating": None,
+                  "transcript": "meet Mr Ogiop", "ideal": None, "tags": []})
+    assert seen == [("meet mr ogi up", "Meet Mr Ogi up.", None,
+                     "meet Mr Ogiop", None, [])]
+    assert ov._pending is None
+
+
 def test_feedback_dismiss_not_recorded():
     ov = Overlay(enabled=False)
     calls = []
