@@ -281,3 +281,17 @@ def test_injector_skips_empty_text():
     with patch("app.injection.inject_clipboard") as clip:
         inj.inject("")
     clip.assert_not_called()
+
+
+def test_clean_collapses_ellipses_without_llm():
+    cfg = CleanupConfig(enabled=False)
+    assert Cleaner(cfg).clean("so I was thinking...") == "So I was thinking."
+
+
+def test_clean_uses_fallback_text_for_local_strip():
+    # LLM off: the local strip runs on fallback_text (pause punctuation),
+    # not the clean model_text.
+    cfg = CleanupConfig(enabled=False)
+    out = Cleaner(cfg).clean("we shipped it the docs are next",
+                             fallback_text="we shipped it. the docs are next")
+    assert out == "We shipped it. The docs are next."

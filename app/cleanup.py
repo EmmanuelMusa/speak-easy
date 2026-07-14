@@ -24,6 +24,7 @@ import requests
 
 from . import power
 from .config import CleanupConfig
+from .stt import collapse_ellipses
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +68,8 @@ never turn ordinary prose that happens to say "first" into a list.
 "quote X end quote" becomes "X". Remove the command words themselves.
 6. When the speaker reports someone's exact words (after "he said", "she \
 told me"...), put the quoted words in quotation marks.
+7. Do not use "..." (ellipses) for trailing-off speech. End the sentence \
+with a single period instead.
 
 NEVER do anything else:
 - Keep every other word exactly as spoken, in the same order. Your output \
@@ -361,41 +364,34 @@ class Cleaner:
         except Exception as exc:
             log.warning("Ollama warmup failed (%s); will retry on first use", exc)
 
-    def clean(self, text: str, context: str | None = None, surrounding=None,
+    def clean(self, model_text: str, fallback_text: str | None = None,
+              context: str | None = None, surrounding=None,
               reformat: bool = True) -> str:
-        """Clean a transcript. Returns the best available cleaned form.
-
-        `context` is recent dictation history, passed to the LLM as
-        reference-only so names and terms stay consistent. `surrounding`
-        (a focus.Surrounding, duck-typed) is the text around the caret: it
-        drives continuation casing/punctuation in both the local and LLM
-        paths. `reformat=False` skips the enumeration→list step — streaming
-        passes it for individual sentence chunks, which must NOT each become a
-        mini-list; the list is built once from the whole utterance at the end.
-        """
-        text = text.strip()
-        if not text:
+        """Clean a transcript. `model_text` is the LLM's input (already
+        resolved for the punctuation_source); `fallback_text` (defaults to
+        `model_text`) is what the local strip runs on. Returns the best
+        available cleaned form."""
+        model_text = model_text.strip()
+        if not model_text:
             return ""
+        fb = (fallback_text if fallback_text is not None else model_text).strip()
         mid_sentence = surrounding is not None and surrounding.mid_sentence
         continues_after = surrounding is not None and surrounding.continues_after
         local = strip_fillers(
-            text, capitalize=not mid_sentence, ensure_period=not continues_after
+            fb, capitalize=not mid_sentence, ensure_period=not continues_after
         )
-
-        if not self.cfg.enabled:
-            return local
-        # A dictation continuing existing text at the caret shouldn't be
-        # restructured into a standalone list.
         reformat_ok = reformat and not (mid_sentence or continues_after)
 
+        if not self.cfg.enabled:
+            return self._finish(local, reformat_ok)
         try:
-            polished = self._ollama_clean(text, context, surrounding)
+            polished = self._ollama_clean(model_text, context, surrounding)
         except Exception as exc:
             log.warning("Ollama cleanup failed (%s); using local cleanup", exc)
             return self._finish(local, reformat_ok)
         if not polished:
             return self._finish(local, reformat_ok)
-        if too_divergent(text, polished):
+        if too_divergent(model_text, polished):
             log.warning(
                 "LLM output diverged from speech (%r); using local cleanup",
                 polished,
@@ -404,9 +400,9 @@ class Cleaner:
         return self._finish(polished, reformat_ok)
 
     def _finish(self, text: str, reformat_ok: bool = True) -> str:
-        """Deterministic post-step: turn an ordinal-led enumeration into a
-        numbered list (the LLM is unreliable at this; see
-        reformat_enumeration). No-op for non-enumerations."""
+        """Deterministic post-step: collapse ellipses, then turn an
+        ordinal-led enumeration into a numbered list (no-op for non-lists)."""
+        text = collapse_ellipses(text)
         return reformat_enumeration(text) if reformat_ok else text
 
     def _ollama_clean(
