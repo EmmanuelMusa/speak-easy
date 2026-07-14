@@ -40,9 +40,25 @@ def test_few_shot_block_appears_in_prompt(tmp_path):
     fake.json.return_value = {"response": "Whatever."}
     fake.raise_for_status.return_value = None
     with patch("app.cleanup.requests.post", return_value=fake) as mock_post:
-        cleaner.clean("this is a long enough sentence to reach the model")
+        # query shares distinctive terms with the stored correction -> retrieved
+        cleaner.clean("go by 4pm no sorry 5pm")
     system = mock_post.call_args.kwargs["json"]["system"]
-    assert "Go by 3pm." in system  # correction injected as example
+    assert "Go by 3pm." in system  # relevant correction injected as example
+
+
+def test_unrelated_utterance_injects_no_correction(tmp_path):
+    store = make_store(tmp_path)
+    store.record("go by 2pm no sorry 3pm", "Go by 2pm, no sorry, 3pm.",
+                 "bad", "Go by 3pm.")
+    cfg = CleanupConfig(enabled=True)
+    cleaner = Cleaner(cfg, training=store)
+    fake = MagicMock()
+    fake.json.return_value = {"response": "Whatever."}
+    fake.raise_for_status.return_value = None
+    with patch("app.cleanup.requests.post", return_value=fake) as mock_post:
+        cleaner.clean("the weather is nice today and the sky is clear")
+    system = mock_post.call_args.kwargs["json"]["system"]
+    assert "Go by 3pm." not in system  # nothing similar -> no example injected
 
 
 def test_delete_correction_removes_lesson(tmp_path):

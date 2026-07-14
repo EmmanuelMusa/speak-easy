@@ -192,9 +192,10 @@ class TrainingStore:
                 for e in kept:
                     fh.write(json.dumps(e, ensure_ascii=False) + "\n")
 
-    def few_shot_block(self, n: int = 5) -> str:
-        """Correction examples formatted for the system prompt ('' if none)."""
-        pairs = self.corrections(n)
+    def few_shot_block(self, query: str, n: int = 5) -> str:
+        """Correction examples RELEVANT to `query` (TF-IDF), formatted for the
+        system prompt. '' when nothing clears the similarity bar."""
+        pairs = self.relevant_corrections(query, n)
         if not pairs:
             return ""
         blocks = [

@@ -416,7 +416,7 @@ class Cleaner:
         system = SYSTEM_PROMPT
         if self.training is not None:
             vocab_terms += self.training.learned_vocab()
-            system += self.training.few_shot_block()
+            system += self.training.few_shot_block(text)
         if surrounding is not None and surrounding.before.strip():
             system += (
                 "\n\nThe processed text will be typed at a cursor that "
