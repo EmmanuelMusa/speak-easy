@@ -302,3 +302,23 @@ def test_cleanup_streaming_defaults_off_for_holistic_quality():
     # is opt-in. Chunking at pauses was what broke punctuation/lists.
     from app.config import CleanupConfig
     assert CleanupConfig().streaming is False
+
+
+def test_number_words_to_digits_not_rejected():
+    from app.cleanup import too_divergent
+    # "ten million" spoken -> "10 million" cleaned drops the WORD "ten"; the
+    # guard must treat spoken numbers as legitimately convertible to digits.
+    raw = "the budget is ten million to twenty million naira"
+    clean = "The budget is 10 million to 20 million Naira."
+    assert not too_divergent(raw, clean)
+
+
+def test_parallel_item_list_not_rejected():
+    from app.cleanup import too_divergent
+    raw = ("the registration value is value ten million to twenty million value "
+           "twenty one million to one hundred million value above five hundred million")
+    clean = ("The registration value is:\n"
+             "- Value: 10 million to 20 million\n"
+             "- Value: 21 million to 100 million\n"
+             "- Value: above 500 million")
+    assert not too_divergent(raw, clean)

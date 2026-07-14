@@ -170,6 +170,10 @@ MAX_NOVEL_WORD_RATIO = 0.25
 # formatting) is not worth losing the whole polish pass over.
 MAX_DROPPED_WORDS = 1
 
+# When the output is a formatted list, allow more dropped joining words than the
+# strict prose limit — items shed repeated lead-in words as they're bulleted.
+MAX_DROPPED_WORDS_LIST = 4
+
 # Words the system prompt legitimately removes: spoken punctuation commands
 # ("in bracket X close bracket", "quote X end quote") and enumeration markers
 # that get rewritten as list numbers ("first... second...").
@@ -189,6 +193,15 @@ _DROPPABLE_WORDS = frozenset(
 _LIST_SCAFFOLD_WORDS = frozenset(
     "number numbers one two three four five six seven eight nine ten "
     "then next also finally lastly firstly secondly thirdly and".split()
+)
+
+# Spoken cardinal numbers legitimately become digits ("ten million" -> "10
+# million"), which the word-level guard would otherwise see as dropped words.
+_NUMBER_WORDS = frozenset(
+    "zero one two three four five six seven eight nine ten eleven twelve "
+    "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty "
+    "thirty forty fifty sixty seventy eighty ninety hundred thousand million "
+    "billion trillion and".split()
 )
 
 # A cleaned line that begins with "1." / "2)" / "-" / "*" / "•" is a list item.
@@ -284,12 +297,13 @@ def too_divergent(raw: str, cleaned: str) -> bool:
     # only the correction), so a correction cue waives the check.
     if _CORRECTION_CUE_RE.search(raw):
         return False
-    # When the output is a list, spoken enumeration scaffolding ("number one",
-    # "then", "finally", the trailing "and") is expected to vanish into the
-    # markers, so those words don't count as dropped.
-    droppable = _DROPPABLE_WORDS
+    droppable = _DROPPABLE_WORDS | _NUMBER_WORDS
+    limit = MAX_DROPPED_WORDS
     if _is_list(cleaned):
+        # A dictated list legitimately sheds scaffolding and repeated joining
+        # words as it becomes items, so be more forgiving there.
         droppable = droppable | _LIST_SCAFFOLD_WORDS
+        limit = MAX_DROPPED_WORDS_LIST
     out_set = set(out_words)
     dropped = sum(
         1
@@ -298,7 +312,7 @@ def too_divergent(raw: str, cleaned: str) -> bool:
         and w not in droppable
         and not _NOISE_RE.fullmatch(w)
     )
-    return dropped > MAX_DROPPED_WORDS
+    return dropped > limit
 
 
 def strip_fillers(text: str, capitalize: bool = True, ensure_period: bool = True) -> str:
