@@ -57,7 +57,7 @@ terminal_paste = "ctrl_v"
 [hotkey]
 # Push-to-talk key. Hold to record, release to transcribe + inject.
 # Syntax follows the global-hotkeys package, e.g. "f9" or "control + shift + space".
-binding = "f9"
+binding = "Control + Shift + Space"
 
 [overlay]
 # Wispr-style pill at the bottom center: slim bar when idle, expands into a
