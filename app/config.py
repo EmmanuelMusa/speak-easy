@@ -7,9 +7,12 @@ are missing.
 
 from __future__ import annotations
 
+import logging
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.toml"
 
@@ -138,7 +141,7 @@ def load_config(path: str | Path | None = None) -> Config:
         return Config()
     # Tolerate a UTF-8 BOM (Notepad and PowerShell often add one).
     data = tomllib.loads(path.read_bytes().decode("utf-8-sig"))
-    return Config(
+    cfg = Config(
         stt=_section(data, "stt", SttConfig),
         cleanup=_section(data, "cleanup", CleanupConfig),
         injection=_section(data, "injection", InjectionConfig),
@@ -148,6 +151,12 @@ def load_config(path: str | Path | None = None) -> Config:
         context=_section(data, "context", ContextConfig),
         audio=_section(data, "audio", AudioConfig),
     )
+    if cfg.cleanup.punctuation_source not in ("model", "pauses"):
+        log.warning(
+            "Unrecognized cleanup.punctuation_source %r; 'model' behavior will apply",
+            cfg.cleanup.punctuation_source,
+        )
+    return cfg
 
 
 def _fmt_toml(value) -> str:

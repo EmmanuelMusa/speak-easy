@@ -97,6 +97,7 @@ def collapse_ellipses(text: str) -> str:
     or the Unicode ellipsis are touched."""
     text = re.sub(r"\s*(?:…|\.{2,})\s*$", ".", text)   # trailing -> "."
     text = re.sub(r"\s*(?:…|\.{2,})\s*", " ", text)    # internal -> " "
+    text = re.sub(r"\s+([,.!?;:])", r"\1", text)       # no space before punctuation
     return text.strip()
 
 
@@ -313,8 +314,8 @@ class Transcriber:
             initial_prompt=initial_prompt,
             # Word timings expose the speaker's pauses. VAD only splits on
             # ~2s of silence, so without these a mid-utterance pause is
-            # invisible: Whisper spans it with one segment and the pause
-            # punctuation in stitch_segments never fires.
+            # invisible: Whisper spans it with one segment and there's no
+            # pause boundary for classify_gap to punctuate.
             word_timestamps=True,
         )
         out: list[tuple[float, float, str]] = []
@@ -324,7 +325,8 @@ class Transcriber:
                 out.append((seg.start, seg.end, seg.text.strip()))
                 continue
             # Split the segment wherever the speaker paused, so every real
-            # pause is a boundary that stitch_segments can punctuate.
+            # pause is a boundary that classify_gap (via the resolvers) can
+            # punctuate.
             group = [words[0]]
             for w in words[1:]:
                 if w.start - group[-1].end >= COMMA_GAP_S:

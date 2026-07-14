@@ -126,6 +126,10 @@ class StreamingSession:
             self._prev_end_abs = base + end
 
     def _resolve_range(self, a: int, b: int, source: str) -> str:
+        # boundaries[a:b] intentionally excludes boundaries[b] — the period
+        # pause that ENDS this sentence; that terminal period is re-added
+        # downstream by strip_fillers/the LLM. Do not "fix" this to
+        # boundaries[a:b+1] or sentences double-punctuate.
         return resolve_model(self._parts[a:b + 1], self._boundaries[a:b], source)
 
     def stable_sentences(self, source: str) -> list[str]:

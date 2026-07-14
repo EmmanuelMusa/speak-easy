@@ -87,6 +87,8 @@ def test_collapse_ellipses():
     # A normal single period is untouched.
     assert collapse_ellipses("e.g. this") == "e.g. this"
     assert collapse_ellipses("all good.") == "all good."
+    # No stray space before trailing punctuation after an internal ellipsis.
+    assert collapse_ellipses("wait...?") == "wait?"
 
 
 def test_model_view_drops_pause_punctuation():
