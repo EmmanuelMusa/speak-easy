@@ -322,3 +322,10 @@ def test_parallel_item_list_not_rejected():
              "- Value: 21 million to 100 million\n"
              "- Value: above 500 million")
     assert not too_divergent(raw, clean)
+
+
+def test_prompt_covers_parallel_item_lists():
+    from app.cleanup import SYSTEM_PROMPT
+    p = SYSTEM_PROMPT.lower()
+    assert "parallel" in p or "same shape" in p  # parallel-item list rule present
+    assert "- " in SYSTEM_PROMPT                  # a bulleted-list example present

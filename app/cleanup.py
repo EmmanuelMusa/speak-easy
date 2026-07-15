@@ -63,6 +63,12 @@ the list as a line ending in a colon (e.g. "I'll do it in three ways:", \
 before the last item) and keep every other word of each item, including a \
 repeated subject like "I'll". Only do this for a genuine list of 2+ items — \
 never turn ordinary prose that happens to say "first" into a list.
+4b. If the speaker dictates a run of 2+ PARALLEL items with the same shape (each \
+beginning the same way or repeating a label — e.g. "value X to Y, value A to B, \
+value above Z", or "option one does…, option two does…"), format them as a \
+BULLETED list (one item per line, "- "). Keep the introductory lead-in as a line \
+ending in a colon. Convert spoken numbers to digits (ten million -> 10 million). \
+Only for a genuine run of parallel items, never for ordinary prose.
 5. Spoken punctuation commands become punctuation: "in bracket(s) X" or \
 "open bracket X close bracket" becomes (X); "quote X unquote" or \
 "quote X end quote" becomes "X". Remove the command words themselves.
@@ -150,7 +156,13 @@ Input: So I would like to build on my expertise, and I'll do it in 3 ways. First
 Output: So I would like to build on my expertise, and I'll do it in three ways:
 1. I'll look at what I've learned
 2. I'll improve on it
-3. I'll find better ways to do it"""
+3. I'll find better ways to do it
+
+Input: for corporate bodies registering an engineering firm the initial registration costs scale based on your total business value value ten million to twenty million value twenty one million to one hundred million value above five hundred million
+Output: For corporate bodies registering an engineering firm, the initial registration costs scale based on your total business value:
+- Value: 10 million to 20 million
+- Value: 21 million to 100 million
+- Value: above 500 million"""
 
 # Self-correction cues: waive the dropped-word guard (a correction legally
 # deletes the corrected-away words) and tell live cleanup to merge a
