@@ -46,6 +46,14 @@ class ParakeetTranscriber:
                     "pip install -r requirements-parakeet.txt"
                 ) from exc
             provs = _providers()
+            if "CUDAExecutionProvider" in provs:
+                # onnxruntime-gpu's CUDA provider loads cuDNN/cuBLAS via plain
+                # LoadLibrary, which only searches PATH — but those DLLs ship in
+                # the nvidia-*-cu12 wheels (site-packages/nvidia/*/bin), off the
+                # default path. Reuse faster-whisper's registration so Parakeet
+                # finds them too; otherwise the CUDA session fails to initialise.
+                from .stt import _register_nvidia_dlls
+                _register_nvidia_dlls()
             self._model = onnx_asr.load_model(self.cfg.parakeet_model, providers=provs)
             log.info("Parakeet model '%s' loaded (providers: %s)",
                      self.cfg.parakeet_model, provs)
