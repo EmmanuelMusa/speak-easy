@@ -1,8 +1,9 @@
 # Speak Easy — local Wispr Flow clone configuration
 
 [stt]
-# Whisper model size: tiny.en (fastest) | base | small.en | medium | large-v3
-model = "small.en"
+# Whisper model: tiny.en (fastest) | base | small.en | medium | large-v3 |
+# large-v3-turbo (near-large-v3 accuracy, ~4-8x faster — downloads ~1.6GB on first use)
+model = "large-v3"
 # "auto" tries CUDA first, falls back to CPU. Or force "cuda" / "cpu".
 device = "auto"
 # Compute type when on CUDA. CPU always uses int8.
@@ -59,7 +60,7 @@ terminal_paste = "ctrl_v"
 [hotkey]
 # Push-to-talk key. Hold to record, release to transcribe + inject.
 # Syntax follows the global-hotkeys package, e.g. "f9" or "control + shift + space".
-binding = "Control + Shift + Space"
+binding = "Control + f9"
 
 [overlay]
 # Wispr-style pill at the bottom center: slim bar when idle, expands into a

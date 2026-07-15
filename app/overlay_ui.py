@@ -48,7 +48,8 @@ HOVER_GRACE_S = 0.5               # chip lingers briefly after the mouse leaves
 BARS = 15                          # finer resolution than before (was 11)
 BAR_W = 2.4                        # crisp pill-shaped bar width
 
-STT_MODELS = ["tiny.en", "base", "small.en", "medium", "large-v3"]
+STT_MODELS = ["tiny.en", "base", "small.en", "medium", "large-v3",
+              "large-v3-turbo"]
 OLLAMA_MODELS = ["llama3.1:8b", "llama3.2:3b", "phi3:mini", "mistral:7b"]
 DELIVERY = ["clipboard", "sendinput"]
 
