@@ -27,6 +27,12 @@ class SttConfig:
     # Transcribe while the hotkey is held (commit settled segments early)
     # so release only pays for the last ~second of audio.
     streaming: bool = True
+    # Speech-to-text engine: "whisper" (faster-whisper) or "parakeet"
+    # (NVIDIA Parakeet TDT via onnx-asr — pip install -r requirements-parakeet.txt).
+    engine: str = "whisper"
+    # Parakeet model id for onnx-asr (English v2, or "nemo-parakeet-tdt-0.6b-v3"
+    # for multilingual). Only used when engine = "parakeet".
+    parakeet_model: str = "nemo-parakeet-tdt-0.6b-v2"
 
 
 @dataclass

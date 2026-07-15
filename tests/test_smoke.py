@@ -338,3 +338,9 @@ def test_prose_paraphrase_dropping_and_plus_word_is_rejected():
     raw = "please send the invoice and receipt to accounting"
     clean = "Please send the invoice to accounting."
     assert too_divergent(raw, clean)
+
+
+def test_stt_engine_defaults():
+    from app.config import SttConfig
+    assert SttConfig().engine == "whisper"
+    assert SttConfig().parakeet_model == "nemo-parakeet-tdt-0.6b-v2"

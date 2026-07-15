@@ -14,6 +14,11 @@ beam_size = 2
 # Transcribe while the hotkey is held: settled speech is committed in the
 # background, so on release only the last ~second needs transcribing.
 streaming = true
+# Speech-to-text engine: "whisper" (faster-whisper, streaming) or "parakeet"
+# (NVIDIA Parakeet TDT via onnx-asr — run: pip install -r requirements-parakeet.txt;
+# for GPU: pip uninstall onnxruntime && pip install onnxruntime-gpu). Non-streaming.
+engine = "whisper"
+parakeet_model = "nemo-parakeet-tdt-0.6b-v2"
 
 [cleanup]
 # Master switch for the Ollama LLM cleanup pass.
