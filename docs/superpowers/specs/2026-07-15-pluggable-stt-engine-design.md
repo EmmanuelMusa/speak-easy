@@ -29,8 +29,14 @@ NeMo/PyTorch). Selectable in `config.toml` and the Settings dialog.
 ### `ParakeetTranscriber` (new `app/parakeet.py`)
 
 Duck-types the parts of `Transcriber` the app uses:
-- `__init__(cfg: SttConfig)`; `_load()` lazily `onnx_asr.load_model(cfg.parakeet_model)`
-  (cached); `warmup()` = `_load()`.
+- `__init__(cfg: SttConfig)`; `_load()` lazily `onnx_asr.load_model(cfg.parakeet_model,
+  providers=<auto>)` (cached); `warmup()` = `_load()`.
+- **Auto GPU** (mirrors Whisper's `device = "auto"`): at load, inspect
+  `onnxruntime.get_available_providers()` and pass `providers` preferring
+  `CUDAExecutionProvider` (then `CPUExecutionProvider`) when CUDA is available,
+  else CPU only. So with `onnxruntime-gpu` installed the GPU is used with no
+  config; with the CPU-only `onnxruntime` it runs on CPU. Log which provider was
+  chosen. (CUDA libs come from the existing `requirements-gpu.txt` wheels.)
 - `transcribe(audio, initial_prompt=None) -> Transcript`: `recognize` the audio
   (numpy float32 @ 16 kHz, or a wav path for `--dry-run`) and return
   `Transcript(parts=[text] if text else [], boundaries=[])`. No pause boundaries
@@ -70,8 +76,9 @@ Duck-types the parts of `Transcriber` the app uses:
 
 ### Packaging
 
-- `requirements-parakeet.txt`: `onnx-asr` (note: `onnxruntime` is already a base
-  dep transitively; for CUDA install `onnxruntime-gpu`). The base
+- `requirements-parakeet.txt`: `onnx-asr` (CPU `onnxruntime` is already present).
+  For GPU, a comment: `pip uninstall onnxruntime && pip install onnxruntime-gpu`
+  (they conflict) — the CUDA/cuDNN libs come from `requirements-gpu.txt`. The base
   `requirements.txt` is unchanged — Parakeet stays opt-in.
 - README: a short "Choosing an STT engine" note (Whisper vs Parakeet; how to
   install the Parakeet extra).
