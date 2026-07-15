@@ -458,7 +458,7 @@ class Injector:
         if not old or not new_text:
             return False
         _set_foreground_window(self.last_hwnd)
-        time.sleep(0.12)
+        time.sleep(0.2)
 
         previous_clip = None
         try:
@@ -477,7 +477,8 @@ class Injector:
 
         if not selection_matches(old, selected):
             _tap(VK_RIGHT)  # deselect, leave the user's text untouched
-            log.info("Replace aborted: text changed since injection")
+            log.info("Replace aborted: text changed since injection "
+                     "(expected %r, selection %r)", old, selected)
             # No paste was sent, so an immediate restore is race-free.
             if previous_clip is not None:
                 try:

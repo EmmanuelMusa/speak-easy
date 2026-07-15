@@ -60,6 +60,29 @@ def test_replace_last_noop_without_prior_injection():
     assert inj.replace_last("anything") is False
 
 
+def test_replace_last_logs_expected_and_got_on_mismatch(caplog):
+    import logging
+
+    inj = Injector(InjectionConfig(delivery_method="clipboard"))
+    inj.last_text = "Go by 2pm."
+    with patch("app.injection._set_foreground_window"), \
+         patch("app.injection._select_back"), \
+         patch("app.injection._press_ctrl_c"), \
+         patch("app.injection._get_clipboard_text",
+               return_value="Go by 2pm. and more typing"), \
+         patch("app.injection._set_clipboard_text"), \
+         patch.object(inj, "_deliver") as deliver, \
+         patch("app.injection._tap") as tap:
+        with caplog.at_level(logging.INFO, logger="app.injection"):
+            result = inj.replace_last("Go by 3pm.")
+    assert result is False
+    deliver.assert_not_called()
+    tap.assert_called_once()
+    messages = [r.message for r in caplog.records]
+    assert any("Go by 2pm." in m and "Go by 2pm. and more typing" in m
+               for m in messages)
+
+
 # --- deferred clipboard restore (the stale-paste race) ------------------------
 
 def _fake_clipboard(initial: str):
