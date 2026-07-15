@@ -3,7 +3,7 @@
 [stt]
 # Whisper model: tiny.en (fastest) | base | small.en | medium | large-v3 |
 # large-v3-turbo (near-large-v3 accuracy, ~4-8x faster — downloads ~1.6GB on first use)
-model = "large-v3"
+model = "large-v3-turbo"
 # "auto" tries CUDA first, falls back to CPU. Or force "cuda" / "cpu".
 device = "auto"
 # Compute type when on CUDA. CPU always uses int8.
@@ -19,6 +19,10 @@ streaming = true
 # for GPU: pip uninstall onnxruntime && pip install onnxruntime-gpu). Non-streaming.
 engine = "whisper"
 parakeet_model = "nemo-parakeet-tdt-0.6b-v2"
+# Parakeet-on-GPU only: folder where the CUDA-13 runtime was installed
+# (pip install --target <dir> nvidia-*-cu13). Kept separate from faster-whisper's
+# CUDA-12 libs so they don't collide. Empty = CPU / no registration.
+parakeet_cuda_dir = ""
 
 [cleanup]
 # Master switch for the Ollama LLM cleanup pass.
@@ -65,7 +69,7 @@ terminal_paste = "ctrl_v"
 [hotkey]
 # Push-to-talk key. Hold to record, release to transcribe + inject.
 # Syntax follows the global-hotkeys package, e.g. "f9" or "control + shift + space".
-binding = "Control + f9"
+binding = "Control + Shift + Space"
 
 [overlay]
 # Wispr-style pill at the bottom center: slim bar when idle, expands into a

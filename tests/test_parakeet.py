@@ -49,3 +49,21 @@ def test_make_transcriber_selects_engine():
     from app.parakeet import ParakeetTranscriber
     assert isinstance(make_transcriber(SttConfig(engine="parakeet")), ParakeetTranscriber)
     assert isinstance(make_transcriber(SttConfig(engine="whisper")), Transcriber)
+
+
+def test_register_cuda_libs_adds_bin_dirs_to_path(tmp_path, monkeypatch):
+    import os
+    from app.parakeet import _register_cuda_libs
+    (tmp_path / "nvidia" / "cublas" / "bin").mkdir(parents=True)
+    (tmp_path / "nvidia" / "cudnn" / "bin").mkdir(parents=True)
+    monkeypatch.setenv("PATH", "EXISTING")
+    _register_cuda_libs(str(tmp_path))
+    path = os.environ["PATH"]
+    assert str(tmp_path / "nvidia" / "cublas" / "bin") in path
+    assert str(tmp_path / "nvidia" / "cudnn" / "bin") in path
+    assert "EXISTING" in path  # existing PATH preserved
+
+
+def test_register_cuda_libs_missing_dir_is_noop(tmp_path):
+    from app.parakeet import _register_cuda_libs
+    _register_cuda_libs(str(tmp_path / "nope"))  # must not raise

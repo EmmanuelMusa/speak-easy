@@ -33,6 +33,11 @@ class SttConfig:
     # Parakeet model id for onnx-asr (English v2, or "nemo-parakeet-tdt-0.6b-v3"
     # for multilingual). Only used when engine = "parakeet".
     parakeet_model: str = "nemo-parakeet-tdt-0.6b-v2"
+    # For Parakeet on GPU: a folder holding the CUDA-13 runtime the onnxruntime-gpu
+    # wheel needs (pip install --target <dir> nvidia-*-cu13). Kept SEPARATE from
+    # faster-whisper's CUDA-12 libs so the two don't collide (cuDNN shares DLL
+    # names across CUDA versions). Empty = CPU / don't register (safe default).
+    parakeet_cuda_dir: str = ""
 
 
 @dataclass
