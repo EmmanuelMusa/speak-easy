@@ -338,3 +338,12 @@ class Transcriber:
             out.append((group[0].start, group[-1].end,
                         "".join(x.word for x in group).strip()))
         return out
+
+
+def make_transcriber(cfg: SttConfig):
+    """Return the STT backend for the configured engine. Parakeet is imported
+    lazily so the base app never imports onnx-asr."""
+    if cfg.engine == "parakeet":
+        from .parakeet import ParakeetTranscriber
+        return ParakeetTranscriber(cfg)
+    return Transcriber(cfg)
