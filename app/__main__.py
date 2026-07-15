@@ -69,7 +69,7 @@ def _dry_run(cfg, wav_path: str) -> int:
     from pathlib import Path
 
     from .cleanup import Cleaner
-    from .stt import Transcriber
+    from .stt import make_transcriber
 
     wav = Path(wav_path)
     if not wav.exists():
@@ -77,7 +77,7 @@ def _dry_run(cfg, wav_path: str) -> int:
         return 2
 
     print(f"[dry-run] transcribing {wav} (model={cfg.stt.model}, VAD on)...")
-    tr = Transcriber(cfg.stt).transcribe(wav)
+    tr = make_transcriber(cfg.stt).transcribe(wav)
     source = cfg.cleanup.punctuation_source
     print(f"[dry-run] raw transcript : {tr.model_text(source)!r}")
     cleaned = Cleaner(cfg.cleanup).clean(

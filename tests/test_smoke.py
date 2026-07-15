@@ -344,3 +344,21 @@ def test_stt_engine_defaults():
     from app.config import SttConfig
     assert SttConfig().engine == "whisper"
     assert SttConfig().parakeet_model == "nemo-parakeet-tdt-0.6b-v2"
+
+
+def test_parakeet_engine_skips_streaming_session():
+    # With engine=parakeet, _on_press must NOT build a StreamingSession
+    # (Parakeet is non-streaming); the full clip is transcribed at release.
+    from unittest.mock import MagicMock
+    from app.hotkey import PushToTalkApp
+    from app.config import Config
+    cfg = Config()
+    cfg.stt.engine = "parakeet"
+    cfg.stt.streaming = True  # even if streaming is on, Parakeet ignores it
+    fake = MagicMock()
+    fake.cfg = cfg
+    fake.recorder.recording = False
+    fake._busy.locked.return_value = False
+    PushToTalkApp._on_press(fake)
+    assert fake._session is None
+    fake.recorder.start.assert_called_once()

@@ -21,7 +21,7 @@ from . import focus, power, sound
 from .injection import Injector
 from .overlay import Overlay
 from .streaming import StreamingSession
-from .stt import Transcriber
+from .stt import Transcriber, make_transcriber
 from .training import TrainingStore
 
 log = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ class PushToTalkApp:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.recorder = Recorder(cfg.audio)
-        self.transcriber = Transcriber(cfg.stt)
+        self.transcriber = make_transcriber(cfg.stt)
         self.training = TrainingStore()
         self.context = ContextStore(cfg.context)
         self.cleaner = Cleaner(cfg.cleanup, training=self.training)
@@ -93,7 +93,7 @@ class PushToTalkApp:
         if self.cfg.audio.start_sound:
             sound.play_start_cue(self.cfg.audio.start_sound_volume)
         self.recorder.start()
-        if self.cfg.stt.streaming:
+        if self.cfg.stt.streaming and self.cfg.stt.engine == "whisper":
             self._session = StreamingSession(
                 self.transcriber,
                 self.recorder.snapshot,
@@ -106,6 +106,8 @@ class PushToTalkApp:
                     context_provider=self.context.cleanup_context,
                     surrounding_provider=lambda: self._surrounding,
                 ).start()
+        else:
+            self._session = None
         self._surrounding = None
         if self.cfg.context.surrounding:
             self._press_gen += 1
@@ -232,6 +234,7 @@ class PushToTalkApp:
             "replace_on_correction": self.cfg.training.replace_on_correction,
             "hotkey": self.cfg.hotkey.binding,
             "stt_model": self.cfg.stt.model,
+            "engine": self.cfg.stt.engine,
             "ollama_model": self.cfg.cleanup.ollama_model,
             "cleanup_enabled": self.cfg.cleanup.enabled,
             "delivery_method": self.cfg.injection.delivery_method,
@@ -243,6 +246,7 @@ class PushToTalkApp:
         log.info("Applying settings: %s", values)
         old_hotkey = self.cfg.hotkey.binding
         old_model = self.cfg.stt.model
+        old_engine = self.cfg.stt.engine
 
         self.cfg.training.enabled = bool(values.get("training_enabled", False))
         self.cfg.training.replace_on_correction = bool(
@@ -265,6 +269,7 @@ class PushToTalkApp:
             new_hotkey = old_hotkey
         self.cfg.hotkey.binding = new_hotkey
         self.cfg.stt.model = values.get("stt_model", old_model)
+        self.cfg.stt.engine = values.get("engine", old_engine)
         self.cfg.cleanup.ollama_model = values.get(
             "ollama_model", self.cfg.cleanup.ollama_model
         )
@@ -279,7 +284,7 @@ class PushToTalkApp:
                 "replace_on_correction": self.cfg.training.replace_on_correction,
             },
             "hotkey": {"binding": self.cfg.hotkey.binding},
-            "stt": {"model": self.cfg.stt.model},
+            "stt": {"model": self.cfg.stt.model, "engine": self.cfg.stt.engine},
             "cleanup": {
                 "ollama_model": self.cfg.cleanup.ollama_model,
                 "enabled": self.cfg.cleanup.enabled,
@@ -292,7 +297,7 @@ class PushToTalkApp:
                 # Rebind failed at the library level even though the name
                 # validated; the previous key was restored, so reflect that.
                 self.cfg.hotkey.binding = old_hotkey
-        if self.cfg.stt.model != old_model:
+        if self.cfg.stt.model != old_model or self.cfg.stt.engine != old_engine:
             threading.Thread(target=self._reload_stt, daemon=True).start()
         self.overlay.send_settings(self._settings_snapshot())
 
@@ -339,11 +344,15 @@ class PushToTalkApp:
             return False
 
     def _reload_stt(self) -> None:
-        log.info("Loading Whisper model '%s'...", self.cfg.stt.model)
-        new = Transcriber(self.cfg.stt)
-        new._load()
+        log.info("Loading STT engine '%s'...", self.cfg.stt.engine)
+        new = make_transcriber(self.cfg.stt)
+        try:
+            new._load()
+        except Exception as exc:
+            log.error("STT engine failed to load (%s); keeping current", exc)
+            return
         self.transcriber = new
-        log.info("Speech model switched to '%s'", self.cfg.stt.model)
+        log.info("Speech engine switched to '%s'", self.cfg.stt.engine)
 
     # -- main loop ---------------------------------------------------------
 
@@ -368,8 +377,11 @@ class PushToTalkApp:
             threading.Thread(target=focus.warmup, daemon=True).start()
         self.overlay.show_idle()  # slim ready-bar at the bottom of the screen
         self.overlay.send_settings(self._settings_snapshot())
-        log.info("Loading Whisper model '%s'...", self.cfg.stt.model)
-        self.transcriber._load()
+        log.info("Loading STT engine '%s'...", self.cfg.stt.engine)
+        try:
+            self.transcriber._load()
+        except Exception as exc:
+            log.error("STT engine failed to load (%s)", exc)
 
         gh.register_hotkeys([
             [self.cfg.hotkey.binding, self._on_press, self._on_release, False],
