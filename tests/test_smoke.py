@@ -362,3 +362,21 @@ def test_parakeet_engine_skips_streaming_session():
     PushToTalkApp._on_press(fake)
     assert fake._session is None
     fake.recorder.start.assert_called_once()
+
+
+def test_on_press_skips_streaming_when_transcriber_cant_segment():
+    # Race guard: even with engine=whisper + streaming, if the current
+    # transcriber lacks transcribe_segments (mid engine-switch), no StreamingSession.
+    from unittest.mock import MagicMock
+    from app.hotkey import PushToTalkApp
+    from app.config import Config
+    cfg = Config()
+    cfg.stt.engine = "whisper"
+    cfg.stt.streaming = True
+    fake = MagicMock()
+    fake.cfg = cfg
+    fake.recorder.recording = False
+    fake._busy.locked.return_value = False
+    fake.transcriber = MagicMock(spec=[])   # no transcribe_segments attribute
+    PushToTalkApp._on_press(fake)
+    assert fake._session is None

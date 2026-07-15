@@ -51,12 +51,6 @@ class ParakeetTranscriber:
                      self.cfg.parakeet_model, provs)
         return self._model
 
-    def warmup(self) -> None:
-        try:
-            self._load()
-        except Exception as exc:
-            log.warning("Parakeet warmup failed (%s); will retry on first use", exc)
-
     def transcribe(self, audio, initial_prompt: str | None = None) -> Transcript:
         """Transcribe a mono float32 array (16 kHz) or a wav path. Returns a
         Transcript with the plain text as its single part (no pause boundaries —

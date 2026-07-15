@@ -21,7 +21,7 @@ from . import focus, power, sound
 from .injection import Injector
 from .overlay import Overlay
 from .streaming import StreamingSession
-from .stt import Transcriber, make_transcriber
+from .stt import make_transcriber
 from .training import TrainingStore
 
 log = logging.getLogger(__name__)
@@ -93,7 +93,11 @@ class PushToTalkApp:
         if self.cfg.audio.start_sound:
             sound.play_start_cue(self.cfg.audio.start_sound_volume)
         self.recorder.start()
-        if self.cfg.stt.streaming and self.cfg.stt.engine == "whisper":
+        if (
+            self.cfg.stt.streaming
+            and self.cfg.stt.engine == "whisper"
+            and hasattr(self.transcriber, "transcribe_segments")
+        ):
             self._session = StreamingSession(
                 self.transcriber,
                 self.recorder.snapshot,
@@ -192,6 +196,8 @@ class PushToTalkApp:
                 if self.cfg.training.enabled:
                     self._last_audio = (audio, self.cfg.audio.sample_rate)
                     self.overlay.request_feedback(raw, cleaned)
+            except Exception:
+                log.exception("Dictation failed")
             finally:
                 self.overlay.show_idle()
 
