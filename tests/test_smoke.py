@@ -329,3 +329,12 @@ def test_prompt_covers_parallel_item_lists():
     p = SYSTEM_PROMPT.lower()
     assert "parallel" in p or "same shape" in p  # parallel-item list rule present
     assert "- " in SYSTEM_PROMPT                  # a bulleted-list example present
+
+
+def test_prose_paraphrase_dropping_and_plus_word_is_rejected():
+    from app.cleanup import too_divergent
+    # Dropping a conjunction AND a content word in prose is real content loss —
+    # the guard must still catch it (regression: "and" was wrongly always-droppable).
+    raw = "please send the invoice and receipt to accounting"
+    clean = "Please send the invoice to accounting."
+    assert too_divergent(raw, clean)
