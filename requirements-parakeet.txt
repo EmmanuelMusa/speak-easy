@@ -1,0 +1,6 @@
+# Optional: NVIDIA Parakeet TDT speech-to-text engine (set [stt].engine = "parakeet").
+# Lightweight — no NeMo/PyTorch. onnxruntime (CPU) is already a base dependency.
+onnx-asr>=0.12
+# For GPU (NVIDIA CUDA): swap the CPU runtime for the GPU one —
+#   pip uninstall onnxruntime && pip install onnxruntime-gpu
+# The CUDA/cuDNN libraries come from requirements-gpu.txt.
