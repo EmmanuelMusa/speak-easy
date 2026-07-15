@@ -50,6 +50,7 @@ BAR_W = 2.4                        # crisp pill-shaped bar width
 
 STT_MODELS = ["tiny.en", "base", "small.en", "medium", "large-v3",
               "large-v3-turbo"]
+STT_ENGINES = ["whisper", "parakeet"]
 OLLAMA_MODELS = ["llama3.1:8b", "llama3.2:3b", "phi3:mini", "mistral:7b"]
 DELIVERY = ["clipboard", "sendinput"]
 
@@ -478,6 +479,11 @@ def main() -> int:
                 "Fix the typed text in place on correction"
             )
             self.hotkey = QtWidgets.QLineEdit()
+            self.engine = QtWidgets.QComboBox()
+            self.engine.addItems(STT_ENGINES)
+            self.engine.setToolTip(
+                "whisper = faster-whisper; parakeet = NVIDIA Parakeet TDT via onnx-asr "
+                "(pip install -r requirements-parakeet.txt). Speech model below applies to whisper.")
             self.stt_model = QtWidgets.QComboBox()
             self.stt_model.addItems(STT_MODELS)
             self.ollama_model = QtWidgets.QComboBox()
@@ -514,6 +520,7 @@ def main() -> int:
             section("DICTATION")
             root.addSpacing(6)
             field("Push-to-talk key", self.hotkey)
+            field("STT engine", self.engine)
             field("Speech model", self.stt_model)
             field("Cleanup model", self.ollama_model)
             root.addWidget(self.cleanup)
@@ -584,6 +591,7 @@ def main() -> int:
             self.training.setChecked(bool(values.get("training_enabled", False)))
             self.replace.setChecked(bool(values.get("replace_on_correction", True)))
             self.hotkey.setText(str(values.get("hotkey", "f9")))
+            self.engine.setCurrentText(str(values.get("engine", "whisper")))
             self.stt_model.setCurrentText(str(values.get("stt_model", "small.en")))
             self.ollama_model.setCurrentText(str(values.get("ollama_model", "llama3.1:8b")))
             self.cleanup.setChecked(bool(values.get("cleanup_enabled", True)))
@@ -597,6 +605,7 @@ def main() -> int:
                     "training_enabled": self.training.isChecked(),
                     "replace_on_correction": self.replace.isChecked(),
                     "hotkey": self.hotkey.text().strip() or "f9",
+                    "engine": self.engine.currentText(),
                     "stt_model": self.stt_model.currentText(),
                     "ollama_model": self.ollama_model.currentText().strip(),
                     "cleanup_enabled": self.cleanup.isChecked(),
