@@ -51,6 +51,7 @@ BAR_W = 2.4                        # crisp pill-shaped bar width
 STT_MODELS = ["tiny.en", "base", "small.en", "medium", "large-v3",
               "large-v3-turbo"]
 STT_ENGINES = ["whisper", "parakeet"]
+PARAKEET_MODELS = ["nemo-parakeet-tdt-0.6b-v2", "nemo-parakeet-tdt-0.6b-v3"]
 OLLAMA_MODELS = ["llama3.1:8b", "llama3.2:3b", "phi3:mini", "mistral:7b"]
 DELIVERY = ["clipboard", "sendinput"]
 
@@ -482,10 +483,14 @@ def main() -> int:
             self.engine = QtWidgets.QComboBox()
             self.engine.addItems(STT_ENGINES)
             self.engine.setToolTip(
-                "whisper = faster-whisper; parakeet = NVIDIA Parakeet TDT via onnx-asr "
-                "(pip install -r requirements-parakeet.txt). Speech model below applies to whisper.")
+                "whisper = faster-whisper (streaming); parakeet = NVIDIA Parakeet "
+                "TDT via onnx-asr (pip install -r requirements-parakeet.txt).")
             self.stt_model = QtWidgets.QComboBox()
             self.stt_model.addItems(STT_MODELS)
+            self.parakeet_model = QtWidgets.QComboBox()
+            self.parakeet_model.addItems(PARAKEET_MODELS)
+            self.parakeet_model.setToolTip("v2 = English (fastest/most accurate EN); "
+                                           "v3 = multilingual")
             self.ollama_model = QtWidgets.QComboBox()
             self.ollama_model.setEditable(True)
             self.ollama_model.addItems(OLLAMA_MODELS)
@@ -510,18 +515,29 @@ def main() -> int:
                 lbl.setProperty("role", "section")
                 root.addWidget(lbl)
 
-            def field(label: str, widget) -> None:
+            def field(label: str, widget):
+                """A label+widget row in its own container, so it can be shown
+                or hidden as a unit (space collapses cleanly when hidden)."""
+                c = QtWidgets.QWidget()
+                lay = QtWidgets.QVBoxLayout(c)
+                lay.setContentsMargins(0, 0, 0, 8)
+                lay.setSpacing(4)
                 lbl = QtWidgets.QLabel(label)
                 lbl.setProperty("role", "field")
-                root.addWidget(lbl)
-                root.addWidget(widget)
-                root.addSpacing(8)
+                lay.addWidget(lbl)
+                lay.addWidget(widget)
+                root.addWidget(c)
+                return c
 
             section("DICTATION")
             root.addSpacing(6)
             field("Push-to-talk key", self.hotkey)
             field("STT engine", self.engine)
-            field("Speech model", self.stt_model)
+            # Engine-specific model choice: only the active engine's field shows
+            # (an engine with no options shows nothing here).
+            self._whisper_field = field("Speech model", self.stt_model)
+            self._parakeet_field = field("Parakeet model", self.parakeet_model)
+            self.engine.currentTextChanged.connect(self._sync_engine_fields)
             field("Cleanup model", self.ollama_model)
             root.addWidget(self.cleanup)
             root.addSpacing(12)
@@ -587,16 +603,26 @@ def main() -> int:
             self._review_dialog.raise_()
             self._review_dialog.activateWindow()
 
+        def _sync_engine_fields(self, *_):
+            """Show only the active engine's model field; hide the other."""
+            whisper = self.engine.currentText() == "whisper"
+            self._whisper_field.setVisible(whisper)
+            self._parakeet_field.setVisible(not whisper)
+            self.adjustSize()  # collapse/expand the dialog to fit
+
         def load(self, values: dict):
             self.training.setChecked(bool(values.get("training_enabled", False)))
             self.replace.setChecked(bool(values.get("replace_on_correction", True)))
             self.hotkey.setText(str(values.get("hotkey", "f9")))
             self.engine.setCurrentText(str(values.get("engine", "whisper")))
             self.stt_model.setCurrentText(str(values.get("stt_model", "small.en")))
+            self.parakeet_model.setCurrentText(
+                str(values.get("parakeet_model", "nemo-parakeet-tdt-0.6b-v2")))
             self.ollama_model.setCurrentText(str(values.get("ollama_model", "llama3.1:8b")))
             self.cleanup.setChecked(bool(values.get("cleanup_enabled", True)))
             self.delivery.setCurrentText(str(values.get("delivery_method", "clipboard")))
             self._target = int(values.get("target_pairs", 200))
+            self._sync_engine_fields()
 
         def _save(self):
             emit({
@@ -607,6 +633,7 @@ def main() -> int:
                     "hotkey": self.hotkey.text().strip() or "f9",
                     "engine": self.engine.currentText(),
                     "stt_model": self.stt_model.currentText(),
+                    "parakeet_model": self.parakeet_model.currentText(),
                     "ollama_model": self.ollama_model.currentText().strip(),
                     "cleanup_enabled": self.cleanup.isChecked(),
                     "delivery_method": self.delivery.currentText(),

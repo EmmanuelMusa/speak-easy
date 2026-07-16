@@ -241,6 +241,7 @@ class PushToTalkApp:
             "hotkey": self.cfg.hotkey.binding,
             "stt_model": self.cfg.stt.model,
             "engine": self.cfg.stt.engine,
+            "parakeet_model": self.cfg.stt.parakeet_model,
             "ollama_model": self.cfg.cleanup.ollama_model,
             "cleanup_enabled": self.cfg.cleanup.enabled,
             "delivery_method": self.cfg.injection.delivery_method,
@@ -253,6 +254,7 @@ class PushToTalkApp:
         old_hotkey = self.cfg.hotkey.binding
         old_model = self.cfg.stt.model
         old_engine = self.cfg.stt.engine
+        old_parakeet = self.cfg.stt.parakeet_model
 
         self.cfg.training.enabled = bool(values.get("training_enabled", False))
         self.cfg.training.replace_on_correction = bool(
@@ -276,6 +278,7 @@ class PushToTalkApp:
         self.cfg.hotkey.binding = new_hotkey
         self.cfg.stt.model = values.get("stt_model", old_model)
         self.cfg.stt.engine = values.get("engine", old_engine)
+        self.cfg.stt.parakeet_model = values.get("parakeet_model", old_parakeet)
         self.cfg.cleanup.ollama_model = values.get(
             "ollama_model", self.cfg.cleanup.ollama_model
         )
@@ -290,7 +293,11 @@ class PushToTalkApp:
                 "replace_on_correction": self.cfg.training.replace_on_correction,
             },
             "hotkey": {"binding": self.cfg.hotkey.binding},
-            "stt": {"model": self.cfg.stt.model, "engine": self.cfg.stt.engine},
+            "stt": {
+                "model": self.cfg.stt.model,
+                "engine": self.cfg.stt.engine,
+                "parakeet_model": self.cfg.stt.parakeet_model,
+            },
             "cleanup": {
                 "ollama_model": self.cfg.cleanup.ollama_model,
                 "enabled": self.cfg.cleanup.enabled,
@@ -303,7 +310,11 @@ class PushToTalkApp:
                 # Rebind failed at the library level even though the name
                 # validated; the previous key was restored, so reflect that.
                 self.cfg.hotkey.binding = old_hotkey
-        if self.cfg.stt.model != old_model or self.cfg.stt.engine != old_engine:
+        if (
+            self.cfg.stt.model != old_model
+            or self.cfg.stt.engine != old_engine
+            or self.cfg.stt.parakeet_model != old_parakeet
+        ):
             threading.Thread(target=self._reload_stt, daemon=True).start()
         self.overlay.send_settings(self._settings_snapshot())
 
