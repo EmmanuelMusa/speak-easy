@@ -364,6 +364,39 @@ def test_parakeet_engine_skips_streaming_session():
     fake.recorder.start.assert_called_once()
 
 
+def test_reload_stt_rolls_back_and_warns_on_failure(monkeypatch):
+    # A live engine switch that fails to load must NOT install the broken
+    # engine, must roll the (already-persisted) config back to the working one
+    # so the next start isn't bricked, and must surface a visible warning.
+    from unittest.mock import MagicMock
+    import app.hotkey as hk
+    from app.config import Config
+
+    cfg = Config()
+    cfg.stt.engine = "parakeet"           # _apply_settings already switched...
+    cfg.stt.parakeet_model = "nemo-parakeet-tdt-0.6b-v2"
+    previous = {"model": cfg.stt.model, "engine": "whisper",
+                "parakeet_model": cfg.stt.parakeet_model}
+
+    boom = MagicMock()
+    boom._load.side_effect = RuntimeError("no onnx-asr")
+    monkeypatch.setattr(hk, "make_transcriber", lambda _c: boom)
+    saved: dict = {}
+    monkeypatch.setattr(hk, "save_config_updates", lambda d: saved.update(d))
+    notes: list = []
+    monkeypatch.setattr(hk, "_notify_user", lambda m: notes.append(m))
+
+    fake = MagicMock()
+    fake.cfg = cfg
+    working = fake.transcriber
+    hk.PushToTalkApp._reload_stt(fake, previous)
+
+    assert cfg.stt.engine == "whisper"           # rolled back in memory
+    assert saved["stt"]["engine"] == "whisper"   # ...and re-persisted
+    assert fake.transcriber is working           # broken engine not installed
+    assert notes and "parakeet" in notes[0]      # user was warned
+
+
 def test_on_press_skips_streaming_when_transcriber_cant_segment():
     # Race guard: even with engine=whisper + streaming, if the current
     # transcriber lacks transcribe_segments (mid engine-switch), no StreamingSession.

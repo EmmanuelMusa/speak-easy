@@ -27,6 +27,25 @@ from .training import TrainingStore
 log = logging.getLogger(__name__)
 
 
+def _notify_user(msg: str) -> None:
+    """Surface a problem the user must see even with no console. When launched
+    from a terminal, print to it; under pythonw (no console) pop a Windows
+    message box (0x30 = warning icon) instead. Never raises — failing to warn
+    must not take the app down."""
+    import sys
+    try:
+        if sys.stderr is not None and sys.stderr.isatty():
+            print(msg, file=sys.stderr)
+            return
+    except Exception:
+        pass
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(0, msg, "Speak Easy", 0x30)
+    except Exception:
+        pass
+
+
 def _binding_is_valid(binding: str) -> bool:
     """True if every key in `binding` is a name global_hotkeys recognises.
 
@@ -93,13 +112,19 @@ class PushToTalkApp:
         if self.cfg.audio.start_sound:
             sound.play_start_cue(self.cfg.audio.start_sound_volume)
         self.recorder.start()
+        # Capture the transcriber once: a live engine switch (_reload_stt runs
+        # on a background thread) can swap self.transcriber at any moment, so
+        # the capability check and the StreamingSession must see the SAME
+        # object — otherwise we could build a streaming session around an engine
+        # that can't stream.
+        transcriber = self.transcriber
         if (
             self.cfg.stt.streaming
             and self.cfg.stt.engine == "whisper"
-            and hasattr(self.transcriber, "transcribe_segments")
+            and hasattr(transcriber, "transcribe_segments")
         ):
             self._session = StreamingSession(
-                self.transcriber,
+                transcriber,
                 self.recorder.snapshot,
                 self.cfg.audio.sample_rate,
             ).start()
@@ -315,7 +340,14 @@ class PushToTalkApp:
             or self.cfg.stt.engine != old_engine
             or self.cfg.stt.parakeet_model != old_parakeet
         ):
-            threading.Thread(target=self._reload_stt, daemon=True).start()
+            previous = {
+                "model": old_model,
+                "engine": old_engine,
+                "parakeet_model": old_parakeet,
+            }
+            threading.Thread(
+                target=self._reload_stt, args=(previous,), daemon=True
+            ).start()
         self.overlay.send_settings(self._settings_snapshot())
 
     def _rebind_hotkey(self, previous: str | None = None) -> bool:
@@ -360,16 +392,36 @@ class PushToTalkApp:
                     )
             return False
 
-    def _reload_stt(self) -> None:
-        log.info("Loading STT engine '%s'...", self.cfg.stt.engine)
+    def _reload_stt(self, previous: dict | None = None) -> None:
+        attempted = self.cfg.stt.engine
+        log.info("Loading STT engine '%s'...", attempted)
         new = make_transcriber(self.cfg.stt)
         try:
             new._load()
         except Exception as exc:
             log.error("STT engine failed to load (%s); keeping current", exc)
+            # The new values were already persisted in _apply_settings, so a
+            # failed switch would otherwise leave config.toml pointing at a
+            # broken engine — bricking dictation on the NEXT start. Roll the
+            # persisted settings back to what's actually running.
+            if previous is not None:
+                self.cfg.stt.model = previous["model"]
+                self.cfg.stt.engine = previous["engine"]
+                self.cfg.stt.parakeet_model = previous["parakeet_model"]
+                save_config_updates({"stt": {
+                    "model": self.cfg.stt.model,
+                    "engine": self.cfg.stt.engine,
+                    "parakeet_model": self.cfg.stt.parakeet_model,
+                }})
+                self.overlay.send_settings(self._settings_snapshot())
+            _notify_user(
+                f"Couldn't load the '{attempted}' speech engine, so Speak Easy "
+                f"kept your previous engine and dictation still works.\n\n"
+                f"{exc}"
+            )
             return
         self.transcriber = new
-        log.info("Speech engine switched to '%s'", self.cfg.stt.engine)
+        log.info("Speech engine switched to '%s'", attempted)
 
     # -- main loop ---------------------------------------------------------
 
@@ -395,15 +447,32 @@ class PushToTalkApp:
         self.overlay.show_idle()  # slim ready-bar at the bottom of the screen
         self.overlay.send_settings(self._settings_snapshot())
         log.info("Loading STT engine '%s'...", self.cfg.stt.engine)
+        stt_error: str | None = None
         try:
             self.transcriber._load()
         except Exception as exc:
+            stt_error = str(exc)
             log.error("STT engine failed to load (%s)", exc)
 
         gh.register_hotkeys([
             [self.cfg.hotkey.binding, self._on_press, self._on_release, False],
         ])
         gh.start_checking_hotkeys()
+        if stt_error is not None:
+            # The overlay still shows a "ready" pill, so without this a load
+            # failure looks like the app works — until every dictation silently
+            # no-ops. Warn on a background thread so a modal box can't block the
+            # main loop from starting.
+            threading.Thread(
+                target=_notify_user,
+                args=(
+                    f"Speak Easy is running, but the '{self.cfg.stt.engine}' "
+                    f"speech engine failed to load, so dictation won't work "
+                    f"until it's fixed. Check the log, then restart — or pick a "
+                    f"different engine in Settings.\n\n{stt_error}",
+                ),
+                daemon=True,
+            ).start()
         log.info(
             "Speak Easy ready. Hold '%s' to dictate; Ctrl+C here or the "
             "Quit button in settings to quit.",
