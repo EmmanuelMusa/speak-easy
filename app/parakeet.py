@@ -20,14 +20,17 @@ log = logging.getLogger(__name__)
 
 
 def _providers() -> list[str]:
-    """Prefer CUDA when onnxruntime exposes it, else CPU."""
+    """Pick the best available GPU execution provider, falling back to CPU.
+    CUDA (onnxruntime-gpu) and DirectML (onnxruntime-directml, GPU via DirectX 12
+    — no CUDA needed) are both preferred over CPU; DirectML is the clean Windows
+    GPU path when the CUDA toolchain isn't set up."""
     try:
         import onnxruntime as ort
         avail = set(ort.get_available_providers())
     except Exception:
         return ["CPUExecutionProvider"]
-    picked = [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider")
-              if p in avail]
+    picked = [p for p in ("CUDAExecutionProvider", "DmlExecutionProvider",
+                          "CPUExecutionProvider") if p in avail]
     return picked or ["CPUExecutionProvider"]
 
 

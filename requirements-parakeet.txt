@@ -1,6 +1,11 @@
 # Optional: NVIDIA Parakeet TDT speech-to-text engine (set [stt].engine = "parakeet").
 # Lightweight — no NeMo/PyTorch. onnxruntime (CPU) is already a base dependency.
 onnx-asr>=0.12
-# For GPU (NVIDIA CUDA): swap the CPU runtime for the GPU one —
-#   pip uninstall onnxruntime && pip install onnxruntime-gpu
-# The CUDA/cuDNN libraries come from requirements-gpu.txt.
+# For GPU on Windows, the clean path is DirectML — runs on any DX12 GPU
+# (NVIDIA/AMD/Intel) with NO CUDA/cuDNN, and can't clash with faster-whisper's CUDA:
+#   pip uninstall onnxruntime && pip install onnxruntime-directml
+# The backend auto-detects and prefers the GPU (DmlExecutionProvider), else CPU.
+#
+# Alternative — native CUDA (onnxruntime-gpu): only if its CUDA major matches your
+# installed CUDA toolkit. Its cuDNN shares DLL names with faster-whisper's, so install
+# the matching CUDA runtime into a separate folder and set [stt].parakeet_cuda_dir to it.
