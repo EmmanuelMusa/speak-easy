@@ -15,6 +15,7 @@ import logging
 import math
 import struct
 import sys
+import threading
 import wave
 
 log = logging.getLogger(__name__)
@@ -50,21 +51,34 @@ def _render_cue(volume: float) -> bytes:
     return out.getvalue()
 
 
-def play_start_cue(volume: float = 0.18) -> None:
-    """Play the recording-start cue asynchronously. Never raises."""
+def play_start_cue(volume: float = 0.18) -> threading.Thread | None:
+    """Play the recording-start cue without blocking the hotkey path. Never
+    raises. Returns the player thread (or None if unavailable) for tests.
+
+    winsound CANNOT play asynchronously from an in-memory WAV — SND_MEMORY |
+    SND_ASYNC raises "Cannot play asynchronously from memory", which the old
+    code swallowed at debug level, so the cue silently never played. Instead we
+    play SYNCHRONOUSLY (the only mode that works from memory) on a throwaway
+    daemon thread, so the ~150 ms playback still doesn't block the caller.
+    """
     if sys.platform != "win32":
-        return
+        return None
     try:
         import winsound
     except Exception:
-        return
-    try:
-        wav = _cache.get(volume)
-        if wav is None:
-            wav = _cache[volume] = _render_cue(volume)
-        winsound.PlaySound(
-            wav,
-            winsound.SND_MEMORY | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
-        )
-    except Exception as exc:  # audio device busy/missing — cue is optional
-        log.debug("start cue failed: %s", exc)
+        return None
+
+    def _play() -> None:
+        try:
+            wav = _cache.get(volume)
+            if wav is None:
+                wav = _cache[volume] = _render_cue(volume)
+            winsound.PlaySound(
+                wav, winsound.SND_MEMORY | winsound.SND_NODEFAULT
+            )
+        except Exception as exc:  # audio device busy/missing — cue is optional
+            log.debug("start cue failed: %s", exc)
+
+    t = threading.Thread(target=_play, daemon=True, name="start-cue")
+    t.start()
+    return t

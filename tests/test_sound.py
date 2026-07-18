@@ -38,12 +38,38 @@ def test_play_start_cue_never_raises_and_caches(monkeypatch):
             played.append((data, flags))
 
     monkeypatch.setattr(sound.sys, "platform", "win32")
-    monkeypatch.setitem(sound._cache, 0.2, b"")  # pre-seed nothing else
     sound._cache.clear()
     import sys as _sys
     monkeypatch.setitem(_sys.modules, "winsound", FakeWinsound())
 
-    sound.play_start_cue(0.2)
-    sound.play_start_cue(0.2)
+    # Playback runs on a throwaway thread; join it before asserting.
+    for _ in range(2):
+        t = sound.play_start_cue(0.2)
+        assert t is not None
+        t.join(timeout=2)
     assert len(played) == 2
     assert 0.2 in sound._cache  # rendered once, reused on the second call
+
+
+def test_play_start_cue_does_not_use_async_from_memory(monkeypatch):
+    # Regression: winsound raises "Cannot play asynchronously from memory" for
+    # SND_MEMORY | SND_ASYNC, which silently killed the cue. Memory playback
+    # must NOT pass SND_ASYNC (we play synchronously on a background thread).
+    seen = []
+
+    class FakeWinsound:
+        SND_MEMORY = 4
+        SND_ASYNC = 1
+        SND_NODEFAULT = 2
+
+        def PlaySound(self, data, flags):
+            seen.append(flags)
+
+    monkeypatch.setattr(sound.sys, "platform", "win32")
+    sound._cache.clear()
+    import sys as _sys
+    monkeypatch.setitem(_sys.modules, "winsound", FakeWinsound())
+
+    sound.play_start_cue(0.2).join(timeout=2)
+    assert seen and not (seen[0] & FakeWinsound.SND_ASYNC)
+    assert seen[0] & FakeWinsound.SND_MEMORY

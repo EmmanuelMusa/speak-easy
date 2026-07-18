@@ -355,6 +355,64 @@ def strip_fillers(text: str, capitalize: bool = True, ensure_period: bool = True
     return cleaned
 
 
+def drop_noise(text: str) -> str:
+    """Remove any vocal-noise tokens (um/uh/erm/hmm...) that slipped through,
+    tidying the spacing/punctuation the removal leaves behind — but WITHOUT
+    recasing mid-text or forcing a period, so the LLM's capitalization and
+    sentence flow are preserved.
+
+    This is a safety net over the LLM: small cleanup models (e.g. 3B) reliably
+    strip most fillers but occasionally leave one in ("the um numbers"), and the
+    old code only ran the noise regex on the local-fallback path, never on the
+    model's own output — so a missed "um" reached the screen. A leading noise
+    the model had capitalized ("Um, hello") is re-capitalized after removal so
+    the sentence still starts with a capital."""
+    was_upper = text[:1].isupper()
+    out = _NOISE_RE.sub("", text)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r"\s+([,.!?;:])", r"\1", out)
+    out = re.sub(r"(?m)^[ \t]+", "", out)      # leading spaces a removal left
+    out = out.strip()
+    if was_upper and out[:1].isalpha():
+        out = out[0].upper() + out[1:]
+    return out
+
+
+# Common sentence-continuation words that are never proper nouns — safe to
+# lowercase when a dictation is inserted mid-sentence. A curated set (not "any
+# capitalized word") so a proper noun at the insertion point ("...and John")
+# is never wrongly lowercased.
+_CONTINUE_LOWER = frozenset(
+    "the a an and but so to of in on for with that which this it its is was "
+    "we you they he she if when then also just or as at by from our your their "
+    "there here what where how why because while after before once".split()
+)
+
+
+def flow_edit(text: str, mid_sentence: bool, continues_after: bool) -> str:
+    """Make an inserted dictation flow with the text around the caret, instead
+    of always arriving as its own capitalized, period-terminated sentence.
+
+    - mid_sentence: the caret continues an unfinished sentence, so lowercase the
+      first word when it is a plain continuation word (never a proper noun/"I").
+    - continues_after: more text follows the caret, so drop a single trailing
+      period the model added (it would wrongly split the sentence).
+
+    Deterministic backstop for the LLM instruction, which small models often
+    ignore — and the only lever when the target app exposes no caret context to
+    the model at all."""
+    if not text:
+        return text
+    if mid_sentence and text[0].isupper():
+        head = re.match(r"[A-Za-z]+", text)
+        if head and head.group(0).lower() in _CONTINUE_LOWER:
+            text = text[0].lower() + text[1:]
+    if continues_after and text.rstrip().endswith(".") \
+            and not text.rstrip().endswith(".."):
+        text = text.rstrip()[:-1]
+    return text
+
+
 # Keep the model resident in (V)RAM between dictations.
 KEEP_ALIVE = "30m"
 
@@ -408,27 +466,35 @@ class Cleaner:
         )
         reformat_ok = reformat and not (mid_sentence or continues_after)
 
+        def finish(text: str) -> str:
+            return self._finish(text, reformat_ok, mid_sentence, continues_after)
+
         if not self.cfg.enabled:
-            return self._finish(local, reformat_ok)
+            return finish(local)
         try:
             polished = self._ollama_clean(model_text, context, surrounding)
         except Exception as exc:
             log.warning("Ollama cleanup failed (%s); using local cleanup", exc)
-            return self._finish(local, reformat_ok)
+            return finish(local)
         if not polished:
-            return self._finish(local, reformat_ok)
+            return finish(local)
         if too_divergent(model_text, polished):
             log.warning(
                 "LLM output diverged from speech (%r); using local cleanup",
                 polished,
             )
-            return self._finish(local, reformat_ok)
-        return self._finish(polished, reformat_ok)
+            return finish(local)
+        return finish(polished)
 
-    def _finish(self, text: str, reformat_ok: bool = True) -> str:
-        """Deterministic post-step: collapse ellipses, then turn an
-        ordinal-led enumeration into a numbered list (no-op for non-lists)."""
+    def _finish(self, text: str, reformat_ok: bool = True,
+                mid_sentence: bool = False, continues_after: bool = False) -> str:
+        """Deterministic post-step: strip any vocal noise the model missed,
+        collapse ellipses, make an inserted dictation flow with the caret's
+        sentence, then turn an ordinal-led enumeration into a numbered list
+        (no-op for non-lists)."""
+        text = drop_noise(text)
         text = collapse_ellipses(text)
+        text = flow_edit(text, mid_sentence, continues_after)
         return reformat_enumeration(text) if reformat_ok else text
 
     def _ollama_clean(

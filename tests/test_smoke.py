@@ -340,6 +340,36 @@ def test_prose_paraphrase_dropping_and_plus_word_is_rejected():
     assert too_divergent(raw, clean)
 
 
+def test_drop_noise_catches_fillers_the_model_missed():
+    from app.cleanup import drop_noise
+    # A filler the LLM left in mid-sentence is removed, spacing tidied, casing
+    # preserved (no forced period, no mid-text recap).
+    assert drop_noise("The um quarterly numbers look good") == \
+        "The quarterly numbers look good"
+    # Leading noise the model capitalized -> re-capitalize the new first word.
+    assert drop_noise("Um, hello there") == "Hello there"
+    # Clean text is returned unchanged.
+    assert drop_noise("Ship the release today") == "Ship the release today"
+    # Real words that merely contain the letters are NOT touched.
+    assert drop_noise("The summary is short") == "The summary is short"
+
+
+def test_flow_edit_mid_sentence_and_continuation():
+    from app.cleanup import flow_edit
+    # Mid-sentence: a plain continuation word is lowercased to flow on.
+    assert flow_edit("The rest follows.", mid_sentence=True,
+                     continues_after=False) == "the rest follows."
+    # continues_after: a trailing period the model added is dropped.
+    assert flow_edit("adding a few words.", mid_sentence=True,
+                     continues_after=True) == "adding a few words"
+    # A proper noun at the insertion point is NEVER lowercased.
+    assert flow_edit("John said yes.", mid_sentence=True,
+                     continues_after=False) == "John said yes."
+    # Not mid-sentence: untouched (normal standalone sentence).
+    assert flow_edit("The rest follows.", mid_sentence=False,
+                     continues_after=False) == "The rest follows."
+
+
 def test_stt_engine_defaults():
     from app.config import SttConfig
     assert SttConfig().engine == "whisper"

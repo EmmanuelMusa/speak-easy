@@ -208,6 +208,8 @@ def main() -> int:
 
             self.state = "idle"
             self.level = 0.0
+            self._floor = 0.0          # tracked quiet baseline (auto-gain)
+            self._peak = 0.0           # tracked recent loud peak (auto-gain)
             self.w, self.h = float(DIMS["idle"][0]), float(DIMS["idle"][1])
             self.t = 0.0
             self.history = [0.0] * (BARS * 2)
@@ -353,8 +355,20 @@ def main() -> int:
                 QtCore.Qt.PointingHandCursor if self.chip_hovered
                 else QtCore.Qt.ArrowCursor
             )
+            # Auto-gain: raw mic RMS is tiny (~1e-4 quiet, a small multiple when
+            # speaking) and its magnitude varies hugely by mic and speaker, so
+            # the old fixed `level * 9` mapping left the bars pinned at the
+            # baseline — the waveform looked frozen while you spoke. Instead we
+            # track the quiet floor (slow to rise, fast to fall) and the recent
+            # peak (fast attack, slow release) and show where the level sits
+            # between them: silence rests, speech fills the bars, on any device.
+            lvl = self.level
+            self._floor += (lvl - self._floor) * (0.02 if lvl > self._floor else 0.3)
+            self._peak = max(lvl, self._peak * 0.985)
+            span = self._peak - self._floor
+            disp = 0.0 if span < 1e-5 else max(0.0, min(1.0, (lvl - self._floor) / span))
             self.history.pop(0)
-            self.history.append(min(1.0, self.level * 9.0))
+            self.history.append(disp)
             mid = (BARS - 1) / 2
             for i in range(BARS):
                 if self.state == "recording":
