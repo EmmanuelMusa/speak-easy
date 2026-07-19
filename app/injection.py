@@ -127,6 +127,71 @@ def _get_clipboard_text() -> str | None:
         win32clipboard.CloseClipboard()
 
 
+_NUM_LINE = re.compile(r"^[ \t]*\d+[.)]\s+(.*\S)\s*$")
+_BUL_LINE = re.compile(r"^[ \t]*[-*•]\s+(.*\S)\s*$")
+
+
+def _looks_listy(text: str) -> bool:
+    return any(_NUM_LINE.match(ln) or _BUL_LINE.match(ln)
+               for ln in text.split("\n"))
+
+
+def _text_to_html(text: str) -> str:
+    """Render `text` as an HTML fragment: runs of numbered lines become an
+    <ol>, bulleted lines a <ul>, and everything else a <p>. So a rich editor
+    pastes a real list (with real numbering) rather than literal "1. " text."""
+    import html as _html
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        num, bul = _NUM_LINE.match(lines[i]), _BUL_LINE.match(lines[i])
+        if num or bul:
+            pat, tag = (_NUM_LINE, "ol") if num else (_BUL_LINE, "ul")
+            items = []
+            while i < len(lines) and pat.match(lines[i]):
+                items.append(_html.escape(pat.match(lines[i]).group(1)))
+                i += 1
+            out.append(f"<{tag}>" + "".join(f"<li>{it}</li>" for it in items)
+                       + f"</{tag}>")
+        else:
+            if lines[i].strip():
+                out.append(f"<p>{_html.escape(lines[i].strip())}</p>")
+            i += 1
+    return "".join(out)
+
+
+def _cf_html(fragment: str) -> bytes:
+    """Wrap an HTML fragment in the CF_HTML clipboard format (header of byte
+    offsets, then the HTML). Offsets are computed on the UTF-8 encoding."""
+    prefix = "<html><body><!--StartFragment-->"
+    suffix = "<!--EndFragment--></body></html>"
+    tmpl = ("Version:0.9\r\nStartHTML:{0:08d}\r\nEndHTML:{1:08d}\r\n"
+            "StartFragment:{2:08d}\r\nEndFragment:{3:08d}\r\n")
+    header_len = len(tmpl.format(0, 0, 0, 0).encode("utf-8"))
+    frag_b = fragment.encode("utf-8")
+    start_frag = header_len + len(prefix.encode("utf-8"))
+    end_frag = start_frag + len(frag_b)
+    end_html = end_frag + len(suffix.encode("utf-8"))
+    header = tmpl.format(header_len, end_html, start_frag, end_frag)
+    return (header + prefix).encode("utf-8") + frag_b + suffix.encode("utf-8")
+
+
+def _set_clipboard_rich(text: str, html_fragment: str) -> None:
+    """Put BOTH plain text and an HTML version on the clipboard, so rich editors
+    take the HTML (native list) and everything else takes the plain text."""
+    import win32clipboard  # lazy
+    cf_html = win32clipboard.RegisterClipboardFormat("HTML Format")
+    data = _cf_html(html_fragment)
+    _open_clipboard()
+    try:
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, text)
+        win32clipboard.SetClipboardData(cf_html, data)
+    finally:
+        win32clipboard.CloseClipboard()
+
+
 def _set_clipboard_text(text: str) -> None:
     import win32clipboard  # lazy
 
@@ -339,19 +404,30 @@ def inject_clipboard(
     paste_delay: float = 0.05,
     previous=_AUTO,
     shift_insert: bool = False,
+    rich: bool = True,
 ) -> None:
     """Paste `text` at the cursor via clipboard; restore the clipboard later.
 
     The restore is deferred and verified (see _ClipboardRestorer) so a
     slow-pasting app still reads OUR text, never a stale clipboard.
     `shift_insert` pastes with Shift+Insert (terminals) instead of Ctrl+V.
+    `rich` also puts an HTML version on the clipboard for lists, so rich editors
+    paste a native list; plain text is always included as the fallback.
     """
     if previous is _AUTO:
         try:
             previous = _get_clipboard_text()
         except Exception:
             previous = None
-    _set_clipboard_text(text)
+    placed = False
+    if rich and _looks_listy(text):
+        try:
+            _set_clipboard_rich(text, _text_to_html(text))
+            placed = True
+        except Exception as exc:  # HTML clipboard is best-effort; fall back
+            log.debug("rich clipboard failed (%s); using plain text", exc)
+    if not placed:
+        _set_clipboard_text(text)
     time.sleep(paste_delay)
     if shift_insert:
         _press_shift_insert()
@@ -385,6 +461,7 @@ class Injector:
                 text,
                 paste_delay=self.cfg.paste_delay,
                 shift_insert=shift_insert,
+                rich=self.cfg.rich_paste,
             )
         except Exception as exc:
             # The clipboard was unreachable even after retries. Rather than

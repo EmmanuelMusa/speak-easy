@@ -10,6 +10,32 @@ from app.config import InjectionConfig
 from app.injection import Injector, _ClipboardRestorer, inject_clipboard, selection_matches
 
 
+def test_text_to_html_renders_native_list():
+    from app.injection import _text_to_html, _looks_listy
+    text = "My plan:\n\t1. Do this.\n\t2. Do that.\nThen rest."
+    assert _looks_listy(text)
+    assert _text_to_html(text) == (
+        "<p>My plan:</p><ol><li>Do this.</li><li>Do that.</li></ol>"
+        "<p>Then rest.</p>")
+    # HTML in the item text is escaped, not injected.
+    assert "<script>" not in _text_to_html("1. <script>x</script>")
+    # Plain prose isn't listy.
+    assert not _looks_listy("Just a normal sentence.")
+
+
+def test_cf_html_offsets_point_at_the_fragment():
+    from app.injection import _cf_html
+    import re as _re
+    frag = "<ol><li>a</li><li>b</li></ol>"
+    data = _cf_html(frag)
+    s = data.decode("utf-8")
+    sf = int(_re.search(r"StartFragment:(\d+)", s).group(1))
+    ef = int(_re.search(r"EndFragment:(\d+)", s).group(1))
+    sh = int(_re.search(r"StartHTML:(\d+)", s).group(1))
+    assert data[sf:ef] == frag.encode("utf-8")
+    assert data[sh:sh + 6] == b"<html>"
+
+
 def test_selection_matches_normalizes_whitespace_not_case():
     assert selection_matches("Hello   world.", "Hello world.")  # collapsed spaces
     assert selection_matches("a\nb", "a\r\nb")          # newline normalization

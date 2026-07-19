@@ -262,7 +262,7 @@ def test_injector_dispatches_clipboard():
          patch("app.injection.is_terminal_window", return_value=False):
         inj.inject("hello world")
     clip.assert_called_once_with(
-        "hello world", paste_delay=0.05, shift_insert=False
+        "hello world", paste_delay=0.05, shift_insert=False, rich=True
     )
     send.assert_not_called()
 

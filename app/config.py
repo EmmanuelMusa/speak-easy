@@ -82,6 +82,11 @@ class InjectionConfig:
     # Code accept Ctrl+V, so that's the default; set "shift_insert" for older
     # consoles that only take Shift+Insert.
     terminal_paste: str = "ctrl_v"  # ctrl_v | shift_insert
+    # Also put an HTML version on the clipboard when the text is a list, so rich
+    # editors paste a NATIVE list (indented, auto-continues on Enter) instead of
+    # flat "1. " text. Plain text is always included too, so plain fields and
+    # terminals are unaffected. Turn off if an app mishandles the HTML.
+    rich_paste: bool = True
 
 
 @dataclass
