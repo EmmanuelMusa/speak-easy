@@ -134,6 +134,11 @@ class AudioConfig:
     # Play a subtle low tone when recording starts (hotkey pressed).
     start_sound: bool = True
     start_sound_volume: float = 0.3  # 0.0-1.0, soft confirmation cue
+    # Below this loudness a recording is treated as silence and produces no text
+    # (stops engines without their own VAD from hallucinating on an empty clip).
+    # Lower it if quiet speech gets dropped; raise it if silence still slips
+    # through. Relative to the noise floor, so it's forgiving of mic gain.
+    silence_floor: float = 0.006
 
 
 @dataclass

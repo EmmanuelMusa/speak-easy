@@ -14,6 +14,31 @@ import numpy as np
 from .config import AudioConfig
 
 
+def has_speech(audio, sample_rate: int, floor: float = 0.006) -> bool:
+    """True if `audio` holds something loud enough to be speech, versus silence
+    or steady background noise. A guard for engines without their own VAD
+    (Parakeet transcribes the whole clip, so on a silent recording it can
+    hallucinate a 'ghost' word).
+
+    Speech is short loud bursts well above a quiet noise floor, so we take the
+    loudest 30 ms window and require it to clear BOTH a small absolute floor
+    (rejects true silence) AND a multiple of the noise floor (rejects flat hum/
+    fan noise). Relative to the noise floor, so it works across mic gains."""
+    if audio is None:
+        return False
+    audio = np.asarray(audio, dtype=np.float32).reshape(-1)
+    if audio.size < int(0.12 * sample_rate):   # too brief to be a real dictation
+        return False
+    win = max(1, int(0.03 * sample_rate))
+    n = audio.size // win
+    if n == 0:
+        return float(np.sqrt(np.mean(audio ** 2))) >= floor
+    wr = np.sqrt(np.mean(audio[: n * win].reshape(n, win) ** 2, axis=1))
+    peak = float(wr.max())
+    noise = float(np.percentile(wr, 20))
+    return peak >= floor and peak >= noise * 3.0
+
+
 class Recorder:
     """Start/stop microphone capture; returns a float32 numpy array at stop."""
 

@@ -35,21 +35,24 @@ def _render_cue(volume: float) -> bytes:
     harmonics of the low fundamental that small speakers CAN reproduce, so the
     ear still perceives the deep pitch (missing-fundamental effect). 16-bit mono.
     """
-    dur = 0.20
+    dur = 0.22
     n = int(_SAMPLE_RATE * dur)
-    f_start, f_end = 150.0, 55.0     # pitch drops fast for the "punch"
+    # Sweep from an audible mid pitch DOWN to a deep one: the mid start carries
+    # on small speakers (which roll off below ~200 Hz), the low end gives the
+    # "thump". Slow enough to spend real time in the audible band.
+    f_start, f_end = 330.0, 72.0
     frames = bytearray()
     phase = 0.0
     for i in range(n):
         t = i / _SAMPLE_RATE
-        f = f_end + (f_start - f_end) * math.exp(-t / 0.030)
+        f = f_end + (f_start - f_end) * math.exp(-t / 0.045)
         phase += 2 * math.pi * f / _SAMPLE_RATE
-        attack = min(1.0, t / 0.004)         # ~4 ms soft attack (no hard click)
-        decay = math.exp(-t / 0.070)         # body of the thump
+        attack = min(1.0, t / 0.003)         # ~3 ms soft attack (no hard click)
+        decay = math.exp(-t / 0.085)         # body of the thump
         release = min(1.0, (dur - t) / 0.012)  # fade the tail to zero (no click)
         val = math.sin(phase) * attack * decay
-        val = math.tanh(val * (1.6 + 2.4 * volume))  # drive -> audible harmonics
-        val *= (0.5 + 0.5 * volume) * release  # level tracks setting; clean tail
+        val = math.tanh(val * (2.2 + 2.6 * volume))  # drive -> audible harmonics
+        val *= (0.6 + 0.4 * volume) * release  # level tracks setting; clean tail
         frames += struct.pack("<h", int(max(-1.0, min(1.0, val)) * 32767))
     out = io.BytesIO()
     with wave.open(out, "wb") as w:

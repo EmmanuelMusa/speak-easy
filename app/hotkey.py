@@ -12,7 +12,7 @@ import logging
 import threading
 import time
 
-from .audio import Recorder
+from .audio import Recorder, has_speech
 from .cleanup import Cleaner
 from .config import Config, save_config_updates
 from .context import ContextStore
@@ -210,6 +210,13 @@ class PushToTalkApp:
         with self._busy:
             try:
                 t0 = time.perf_counter()
+                # Silence gate: no real speech in the clip -> produce nothing.
+                # Without this, an engine that has no VAD of its own (Parakeet)
+                # can hallucinate a ghost word from an empty/quiet recording.
+                if not has_speech(audio, self.cfg.audio.sample_rate,
+                                  self.cfg.audio.silence_floor):
+                    log.info("No speech detected (silence).")
+                    return
                 has_before = surrounding is not None and surrounding.before.strip()
                 source = self.cfg.cleanup.punctuation_source
                 fallback_full = None

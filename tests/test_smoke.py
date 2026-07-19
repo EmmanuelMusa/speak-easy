@@ -389,6 +389,25 @@ def test_flow_edit_mid_sentence_and_continuation():
                      continues_after=False) == "The rest follows."
 
 
+def test_has_speech_gates_silence_and_noise_but_passes_speech():
+    import numpy as np
+    from app.audio import has_speech
+    sr = 16000
+    rng = np.random.RandomState(0)
+    # Pure digital silence -> no speech (would otherwise hallucinate a ghost word).
+    assert not has_speech(np.zeros(sr, dtype=np.float32), sr)
+    # Steady quiet noise floor -> no speech (flat, below the floor).
+    assert not has_speech((rng.randn(sr) * 0.001).astype(np.float32), sr)
+    # Loud steady noise -> no speech (flat: no dynamic range above the floor).
+    assert not has_speech((rng.randn(sr) * 0.02).astype(np.float32), sr)
+    # A loud burst amid quiet (speech-like) -> speech.
+    a = (rng.randn(sr) * 0.0005).astype(np.float32)
+    a[sr // 2: sr // 2 + 4000] += (rng.randn(4000) * 0.05).astype(np.float32)
+    assert has_speech(a, sr)
+    # Too short to be a real dictation -> no speech.
+    assert not has_speech(np.full(int(0.05 * sr), 0.1, dtype=np.float32), sr)
+
+
 def test_stt_engine_defaults():
     from app.config import SttConfig
     assert SttConfig().engine == "whisper"
