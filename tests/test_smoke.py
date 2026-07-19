@@ -524,9 +524,19 @@ def test_spoken_punctuation_brackets_and_quotes():
         'she said "i will handle it" today'
     assert f("note in quotes review later end quotes please") == \
         'note "review later" please'
+    # STT mangles the commands: "unquote" -> "on quote", "quotation" w/o "marks".
+    assert f("quotes make it stronger on quote and continue") == \
+        '"make it stronger" and continue'
+    assert f("the word in quotation also end quotation is key") == \
+        'the word "also" is key'
+    # Stray edge punctuation the STT left in the content is trimmed.
+    assert f("in brackets pretty or amazing closed brackets forward") == \
+        "(pretty or amazing) forward"
     # No closing command -> ordinary speech is left untouched.
     assert f("i need a quote from the vendor tomorrow") == \
         "i need a quote from the vendor tomorrow"
+    assert f("i have quotes from three vendors") == \
+        "i have quotes from three vendors"
     assert f("open the bracket on the shelf") == "open the bracket on the shelf"
 
 

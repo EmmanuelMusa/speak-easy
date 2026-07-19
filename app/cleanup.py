@@ -302,20 +302,32 @@ _ROUND_BRACKET_RE = re.compile(
     r"(.+?)\s*"
     r"\b(?:close|closed|end|right)\s+(?:round\s+)?(?:brackets?|parenthes[ei]s|parens?)\b",
     re.IGNORECASE)
+# The opener may be bare "quote(s)"/"quotation(s)" (with optional open/in and
+# "marks"); the closer must be present too. Deliberately tolerant of how the STT
+# mangles the commands — it writes spoken "unquote" as "on quote", capitalises
+# and pluralises the opener ("Quotes,"), and drops "marks" from "quotation".
 _QUOTE_CMD_RE = re.compile(
-    r"\b(?:open\s+quote|in\s+quotes?|in\s+quotation\s+marks?|quote)\b\s*(.+?)\s*"
-    r"\b(?:unquote|end\s+quotes?|close\s+quote|end\s+quotation\s+marks?)\b",
+    r"\b(?:open\s+|in\s+)?quot(?:e|es|ation|ations)(?:\s+marks?)?\b[\s,:]*(.+?)[\s,:]*"
+    r"\b(?:un\s?quote|on\s+quote|(?:end|close)(?:\s+of)?\s+"
+    r"quot(?:e|es|ation|ations)(?:\s+marks?)?)\b",
     re.IGNORECASE)
+
+
+def _inside(s: str) -> str:
+    """The content that goes inside brackets/quotes, minus stray edge punctuation
+    the STT left in ("pretty or amazing," -> "pretty or amazing")."""
+    return s.strip().strip(",;:").strip()
 
 
 def _apply_spoken_punctuation(text: str) -> str:
     """Turn spoken bracket/quote commands into real punctuation:
     "open bracket X close bracket" -> "(X)", "open square bracket X close square
-    bracket" -> "[X]", "quote X unquote" / "in quotes X end quotes" -> '"X"'."""
-    text = _SQ_BRACKET_RE.sub(lambda m: "[" + m.group(1).strip() + "]", text)
-    text = _CURLY_RE.sub(lambda m: "{" + m.group(1).strip() + "}", text)
-    text = _ROUND_BRACKET_RE.sub(lambda m: "(" + m.group(1).strip() + ")", text)
-    text = _QUOTE_CMD_RE.sub(lambda m: '"' + m.group(1).strip() + '"', text)
+    bracket" -> "[X]", "quote X unquote" / "in quotes X end quotes" -> '"X"'.
+    Tolerant of the STT's mistranscriptions of the command words."""
+    text = _SQ_BRACKET_RE.sub(lambda m: "[" + _inside(m.group(1)) + "]", text)
+    text = _CURLY_RE.sub(lambda m: "{" + _inside(m.group(1)) + "}", text)
+    text = _ROUND_BRACKET_RE.sub(lambda m: "(" + _inside(m.group(1)) + ")", text)
+    text = _QUOTE_CMD_RE.sub(lambda m: '"' + _inside(m.group(1)) + '"', text)
     return text
 
 
