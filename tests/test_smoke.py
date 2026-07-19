@@ -446,6 +446,19 @@ def test_enumeration_formats_even_with_surrounding_context():
     assert "1." not in c.clean("and then we should head out", surrounding=s)
 
 
+def test_trailing_sentence_split_off_last_list_item():
+    from app.cleanup import reformat_enumeration
+    # The model glued a closing sentence onto item 3; it must become its own line.
+    got = ("Plan:\n1. Eat ice cream.\n2. Take pancakes.\n"
+           "3. Take fries. Then after all of this it would be nice to rest.")
+    assert reformat_enumeration(got) == (
+        "Plan:\n1. Eat ice cream.\n2. Take pancakes.\n3. Take fries.\n"
+        "Then after all of this it would be nice to rest.")
+    # A clean list with no trailing prose is left exactly as-is.
+    assert reformat_enumeration("Plan:\n1. Wake up.\n2. Sleep.") == \
+        "Plan:\n1. Wake up.\n2. Sleep."
+
+
 def test_cardinal_reformat_ignores_prose_numbers():
     from app.cleanup import reformat_enumeration
     # Not a run starting at one at item boundaries -> left as prose.

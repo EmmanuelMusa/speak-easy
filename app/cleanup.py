@@ -252,7 +252,7 @@ _ORDINAL_ITEM_RE = re.compile(
 # one.com mailbox") never matches. Reformatting only fires when the markers form
 # a run starting at one (see _is_cardinal_run), which stray prose numbers don't.
 _CARDINAL_ITEM_RE = re.compile(
-    r"(?:(?:^|(?<=[.!?])|(?<=,))\s*|\b(?:and|then|next)\s+)"
+    r"(?:(?:^|(?<=[.!?])|(?<=,)|(?<=:))\s*|\b(?:and|then|next)\s+)"
     r"(one|two|three|four|five|six|seven|eight|nine|ten)\b[.,]?\s+",
     re.IGNORECASE,
 )
@@ -298,27 +298,68 @@ def _is_cardinal_run(marks) -> bool:
     return vals[0] == 1 and all(b > a for a, b in zip(vals, vals[1:]))
 
 
+def _cap_end(s: str) -> str:
+    s = s.strip().strip(",;").strip()
+    if not s:
+        return s
+    s = s[0].upper() + s[1:]
+    return s if s[-1] in ".!?" else s + "."
+
+
 def _build_list(text: str, marks) -> str:
     """Turn `text` split at `marks` into a numbered list: the lead-in before the
     first marker becomes a '…:' line, each marker-led span becomes an item with
-    the marker word dropped and everything else kept."""
+    the marker word dropped and everything else kept. A concluding sentence
+    after the last item ("Then after all of this…") is split off so it follows
+    the list as its own line instead of being swallowed into the final item."""
     lead = text[: marks[0].start()].strip()
     items: list[str] = []
+    trailing = ""
     for i, m in enumerate(marks):
         start = m.end()
         end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
-        item = text[start:end].strip().strip(",;").strip()
-        if not item:
+        span = text[start:end].strip().strip(",;").strip()
+        if not span:
             continue
-        item = item[0].upper() + item[1:]
-        if item[-1] not in ".!?":
-            item += "."
-        items.append(item)
+        if i == len(marks) - 1:
+            # Last item: keep only its first sentence; the rest is trailing prose
+            # that belongs after the list, not inside item N.
+            sb = re.search(r"[.!?]\s+(?=[A-Z])", span)
+            if sb:
+                span, trailing = span[: sb.end()].strip(), span[sb.end():].strip()
+        items.append(_cap_end(span))
     if len(items) < 2:
         return text
     lead = lead.rstrip(" .,:;")
     prefix = f"{lead}:\n" if lead else ""
-    return prefix + "\n".join(f"{i + 1}. {it}" for i, it in enumerate(items))
+    out = prefix + "\n".join(f"{i + 1}. {it}" for i, it in enumerate(items))
+    if trailing:
+        out += "\n" + _cap_end(trailing)
+    return out
+
+
+def _split_trailing_from_list(text: str) -> str:
+    """On an already-formatted list, split a concluding sentence off the LAST
+    item onto its own line (the model often glues a closing thought — "…ketchup.
+    Then after all of this…" — onto the final item)."""
+    lines = text.split("\n")
+    last = None
+    for i, ln in enumerate(lines):
+        if _LIST_ITEM_RE.match(ln):
+            last = i
+    if last is None:
+        return text
+    m = _LIST_ITEM_RE.match(lines[last])
+    content = lines[last][m.end():]
+    sb = re.search(r"[.!?]\s+(?=[A-Z])", content)
+    if not sb:
+        return text
+    item, trailing = content[: sb.end()].strip(), content[sb.end():].strip()
+    if not trailing:
+        return text
+    lines[last] = lines[last][: m.end()] + item
+    lines.insert(last + 1, _cap_end(trailing))
+    return "\n".join(lines)
 
 
 def reformat_enumeration(text: str) -> str:
@@ -336,7 +377,9 @@ def reformat_enumeration(text: str) -> str:
     list, so it is safe to call on everything.
     """
     if _is_list(text):
-        return text
+        # Already a list (usually from the model) — just peel a concluding
+        # sentence off the final item if one got glued on.
+        return _split_trailing_from_list(text)
     if looks_like_enumeration(text):
         marks = list(_ORDINAL_ITEM_RE.finditer(text))
         if len(marks) >= 2:
