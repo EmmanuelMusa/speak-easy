@@ -354,6 +354,21 @@ def test_drop_noise_catches_fillers_the_model_missed():
     assert drop_noise("The summary is short") == "The summary is short"
 
 
+def test_capitalize_sentences_fixes_model_lowercase_starts():
+    from app.cleanup import capitalize_sentences
+    # The whole reason this exists: models return lowercase sentence starts.
+    assert capitalize_sentences("hello there. how are you? fine.") == \
+        "Hello there. How are you? Fine."
+    # Already-correct text is unchanged (idempotent).
+    assert capitalize_sentences("Ship it. Then rest.") == "Ship it. Then rest."
+    # Mid-sentence insertion: keep the first letter lowercase, still fix the rest.
+    assert capitalize_sentences("the rest. another point.", cap_first=False) == \
+        "the rest. Another point."
+    # Abbreviations aren't treated as sentence ends.
+    assert capitalize_sentences("meet at 3 p.m. tomorrow") == \
+        "Meet at 3 p.m. tomorrow"
+
+
 def test_flow_edit_mid_sentence_and_continuation():
     from app.cleanup import flow_edit
     # Mid-sentence: a plain continuation word is lowercased to flow on.

@@ -37,16 +37,29 @@ CHIP_ALPHA = 238
 # Pill footprint per state (width, height). Compact, tighter visualizer.
 DIMS = {"idle": (44, 5), "recording": (94, 18), "processing": (94, 18),
         "hide": (44, 5)}
-CANVAS_W, CANVAS_H = 150, 44
-PILL_CY = CANVAS_H / 2             # everything is vertically centered now
+# The canvas leaves headroom ABOVE the pill so the shortcut hint can rise over
+# it on mic-hover; the pill/chip itself sits near the canvas bottom.
+CANVAS_W, CANVAS_H = 300, 104
+PILL_FROM_BOTTOM = 30              # pill centre, measured up from canvas bottom
+PILL_CY = CANVAS_H - PILL_FROM_BOTTOM
+SCREEN_MARGIN = 12                # gap between the pill and the screen edge
 
-# On hover the pill morphs into this settings chip (icon + "Settings" label)
-# in place — it replaces the pill rather than floating above it.
-CHIP_W, CHIP_H = 122, 30
-GEAR_D = 16                        # settings-gear diameter inside the chip
-HOVER_GRACE_S = 0.5               # chip lingers briefly after the mouse leaves
+# On hover the pill reveals two SEPARATE circular buttons — a settings gear and
+# a mic — side by side. Each raises its own tag above it only while hovered.
+CIRCLE_D = 34                      # diameter of each circular button
+CIRCLE_GAP = 16                    # space between the two circles
+GEAR_D = 16                        # settings-gear glyph inside its circle
+MIC_D = 17                         # microphone glyph inside its circle
+HOVER_GRACE_S = 0.5               # buttons linger briefly after the mouse leaves
 BARS = 15                          # finer resolution than before (was 11)
 BAR_W = 2.4                        # crisp pill-shaped bar width
+
+# Per-icon hint tag (rises above a circle while it is hovered).
+HINT_H = 30
+CIRCLE_RGBA = (32, 32, 37)         # circular-button face
+CIRCLE_EDGE = (70, 71, 80)         # circular-button border
+KEYCAP_RGBA = (44, 45, 52)         # raised keycap face
+KEYCAP_EDGE = (86, 88, 98)         # keycap top edge / border
 
 STT_MODELS = ["tiny.en", "base", "small.en", "medium", "large-v3",
               "large-v3-turbo"]
@@ -188,6 +201,61 @@ def main() -> int:
         path.closeSubpath()
         return path
 
+    def _draw_mic(p, cx, cy, d, color, pen_w=1.7):
+        """Draw a crisp vector microphone centred on (cx, cy), `d` tall: a
+        filled capsule head, a stroked cradle arc around its lower half, and a
+        short stem to a base line. No emoji, scales cleanly."""
+        head_w = d * 0.42
+        head_h = d * 0.60
+        head = QtCore.QRectF(cx - head_w / 2, cy - d / 2, head_w, head_h)
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(color)
+        p.drawRoundedRect(head, head_w / 2, head_w / 2)
+        pen = QtGui.QPen(color)
+        pen.setWidthF(pen_w)
+        pen.setCapStyle(QtCore.Qt.RoundCap)
+        p.setPen(pen)
+        p.setBrush(QtCore.Qt.NoBrush)
+        cradle_r = head_w * 0.92
+        cradle = QtCore.QRectF(cx - cradle_r, cy - d / 2 + head_h - cradle_r,
+                               cradle_r * 2, cradle_r * 2)
+        p.drawArc(cradle, 180 * 16, 180 * 16)   # lower semicircle
+        stem_top = cy - d / 2 + head_h + cradle_r * 0.15
+        base_y = cy + d / 2
+        p.drawLine(QtCore.QPointF(cx, stem_top), QtCore.QPointF(cx, base_y))
+        p.drawLine(QtCore.QPointF(cx - d * 0.22, base_y),
+                   QtCore.QPointF(cx + d * 0.22, base_y))
+
+    def _shortcut_keys(binding: str):
+        """Split a hotkey binding ("Control + Shift + Space") into display key
+        names for keycaps (["Ctrl", "Shift", "Space"])."""
+        disp = {"control": "Ctrl", "ctrl": "Ctrl", "shift": "Shift",
+                "alt": "Alt", "super": "Win", "cmd": "Win", "win": "Win",
+                "space": "Space", "escape": "Esc", "enter": "Enter"}
+        keys = []
+        for raw in binding.replace(",", "+").split("+"):
+            k = raw.strip()
+            if not k:
+                continue
+            keys.append(disp.get(k.lower(), k[:1].upper() + k[1:]))
+        return keys or ["F9"]
+
+    def _draw_keycap(p, x, cy, text, font):
+        """Draw a small raised keycap containing `text`, its left edge at x and
+        vertically centred on cy. Returns its right edge x (for laying a row)."""
+        p.setFont(font)
+        fm = QtGui.QFontMetrics(font)
+        pad = 7
+        w = fm.horizontalAdvance(text) + pad * 2
+        h = 19
+        rect = QtCore.QRectF(x, cy - h / 2, w, h)
+        p.setPen(QtGui.QPen(QtGui.QColor(*KEYCAP_EDGE), 1.0))
+        p.setBrush(QtGui.QColor(*KEYCAP_RGBA))
+        p.drawRoundedRect(rect, 5, 5)
+        p.setPen(QtGui.QColor(*BAR_RGBA[:3]))
+        p.drawText(rect, QtCore.Qt.AlignCenter, text)
+        return x + w
+
     # ------------------------------------------------------------------ pill
 
     class Bar(QtWidgets.QWidget):
@@ -204,7 +272,10 @@ def main() -> int:
             self.setMouseTracking(True)
             self.setFixedSize(CANVAS_W, CANVAS_H)
             geo = app.primaryScreen().availableGeometry()
-            self.move(geo.center().x() - CANVAS_W // 2, geo.bottom() - CANVAS_H - 14)
+            # Canvas bottom sits SCREEN_MARGIN above the screen edge; PILL_CY
+            # then puts the pill near the bottom with headroom above for the hint.
+            self.move(geo.center().x() - CANVAS_W // 2,
+                      geo.bottom() - SCREEN_MARGIN - CANVAS_H)
 
             self.state = "idle"
             self.level = 0.0
@@ -214,10 +285,15 @@ def main() -> int:
             self.t = 0.0
             self.history = [0.0] * (BARS * 2)
             self.heights = [0.0] * BARS
-            self.reveal = 0.0          # 0 = pill, 1 = settings chip (animated)
-            self.chip_hovered = False
+            self.reveal = 0.0          # 0 = pill, 1 = the two circular buttons
+            self.chip_hovered = False  # cursor over either button (pointer cursor)
+            self.gear_hovered = False  # cursor over the settings circle
+            self.mic_hovered = False   # cursor over the mic circle
+            self.hint_gear = 0.0       # 0..1 reveal of the "Settings" tag
+            self.hint_mic = 0.0        # 0..1 reveal of the shortcut tag
             self._hover_until = 0.0
             self._pin = None           # debug: force a reveal value for shots
+            self._pin_hint = None      # debug: force a tag open ("gear"/"mic")
             self.settings: dict = {}
             self.settings_dialog = None
             self.feedback_panel = None
@@ -228,34 +304,59 @@ def main() -> int:
 
         # -- geometry helpers ------------------------------------------
 
-        def _morph_geo(self):
-            """Rect + corner radius interpolated between the current pill and
-            the settings chip by self.reveal. One shape, so paint and hit-test
-            agree and there are no click-through gaps."""
+        def _pill_geo(self):
+            """The slim pill rect (idle bar / live waveform), from self.w/h."""
             cx, cy = CANVAS_W / 2, PILL_CY
-            r = self.reveal
-            w = self.w + (CHIP_W - self.w) * r
-            h = self.h + (CHIP_H - self.h) * r
-            rect = QtCore.QRectF(cx - w / 2, cy - h / 2, w, h)
-            return rect, h / 2  # fully rounded (pill-shaped chip)
+            rect = QtCore.QRectF(cx - self.w / 2, cy - self.h / 2,
+                                 self.w, self.h)
+            return rect, self.h / 2
+
+        def _circles(self):
+            """Return (gear_rect, mic_rect): the two circular buttons revealed on
+            hover, side by side and centred on the pill. Full-size once revealed
+            so hit-testing matches the painted glyphs."""
+            cx, cy = CANVAS_W / 2, PILL_CY
+            off = (CIRCLE_D + CIRCLE_GAP) / 2
+            gear = QtCore.QRectF(cx - off - CIRCLE_D / 2, cy - CIRCLE_D / 2,
+                                 CIRCLE_D, CIRCLE_D)
+            mic = QtCore.QRectF(cx + off - CIRCLE_D / 2, cy - CIRCLE_D / 2,
+                                CIRCLE_D, CIRCLE_D)
+            return gear, mic
 
         def _chip_active(self) -> bool:
             return self.reveal > 0.5
 
+        def _hover_pad(self):
+            """Bounding region over both circles (plus slack) that keeps the
+            buttons revealed while the cursor moves between/around them."""
+            cx, cy = CANVAS_W / 2, PILL_CY
+            w = 2 * (CIRCLE_D + CIRCLE_GAP) + CIRCLE_D
+            h = CIRCLE_D + 16
+            return QtCore.QRectF(cx - w / 2, cy - h / 2, w, h)
+
         # -- events ------------------------------------------------------
 
         def mousePressEvent(self, event):
-            rect, _ = self._morph_geo()
-            if self._chip_active() and rect.contains(event.position()):
+            if not self._chip_active():
+                return
+            gear, mic = self._circles()
+            # The mic opens Settings on the hotkey field, so the shortcut it just
+            # previewed is right there to change.
+            if gear.contains(event.position()):
                 self._open_settings()
+            elif mic.contains(event.position()):
+                self._open_settings(focus_hotkey=True)
 
-        def _open_settings(self):
+        def _open_settings(self, focus_hotkey: bool = False):
             if self.settings_dialog is None:
                 self.settings_dialog = SettingsDialog(self.settings)
             self.settings_dialog.load(self.settings)
             self.settings_dialog.show()
             self.settings_dialog.raise_()
             self.settings_dialog.activateWindow()
+            if focus_hotkey:
+                self.settings_dialog.hotkey.setFocus()
+                self.settings_dialog.hotkey.selectAll()
 
         # -- protocol ------------------------------------------------------
 
@@ -298,6 +399,8 @@ def main() -> int:
                     emit({"type": "selftest_err", "error": repr(exc)})
             elif cmd == "pin":  # debug/visual-QA: pin the chip reveal (0..1)
                 self._pin = None if arg == "none" else float(arg)
+            elif cmd == "pinhint":  # debug/visual-QA: force a tag ("gear"/"mic")
+                self._pin_hint = None if arg in ("none", "0", "") else arg
             elif cmd == "shot":  # debug: render current frame over gray -> PNG
                 pm = QtGui.QPixmap(self.size() * 3)  # 3x for a crisp look
                 pm.setDevicePixelRatio(3)
@@ -337,8 +440,12 @@ def main() -> int:
             # live waveform). A short grace keeps it from flickering while the
             # cursor crosses it.
             now = time.monotonic()
+            # The buttons only appear from the idle pill (never over a live
+            # waveform). A short grace keeps them from flickering as the cursor
+            # crosses the gap between the two circles.
+            local = QtCore.QPointF(self.mapFromGlobal(QtGui.QCursor.pos()))
             can_reveal = self.state == "idle"
-            if can_reveal and self.underMouse():
+            if can_reveal and self._hover_pad().contains(local):
                 self._hover_until = now + HOVER_GRACE_S
             want = 1.0 if (can_reveal and now < self._hover_until) else 0.0
             if self._pin is not None:
@@ -346,11 +453,19 @@ def main() -> int:
             self.reveal += (want - self.reveal) * 0.30
             if self.reveal < 0.004:
                 self.reveal = 0.0
-            local = self.mapFromGlobal(QtGui.QCursor.pos())
-            rect, _ = self._morph_geo()
-            self.chip_hovered = self._chip_active() and rect.contains(
-                QtCore.QPointF(local)
-            )
+            active = self._chip_active()
+            gear, mic = self._circles()
+            self.gear_hovered = active and gear.contains(local)
+            self.mic_hovered = active and mic.contains(local)
+            self.chip_hovered = self.gear_hovered or self.mic_hovered
+            # Each tag rises only while its own circle is hovered.
+            want_gear = 1.0 if (self.gear_hovered or self._pin_hint == "gear") else 0.0
+            want_mic = 1.0 if (self.mic_hovered or self._pin_hint == "mic") else 0.0
+            self.hint_gear += (want_gear - self.hint_gear) * 0.28
+            self.hint_mic += (want_mic - self.hint_mic) * 0.28
+            for attr in ("hint_gear", "hint_mic"):
+                if getattr(self, attr) < 0.004:
+                    setattr(self, attr, 0.0)
             self.setCursor(
                 QtCore.Qt.PointingHandCursor if self.chip_hovered
                 else QtCore.Qt.ArrowCursor
@@ -393,32 +508,27 @@ def main() -> int:
             cx, cy = CANVAS_W / 2, PILL_CY
             r = self.reveal
 
-            # Alpha-1 hover pad around the slim idle bar so the small target is
-            # easy to reach (fully transparent pixels of a translucent window
-            # are click-through on Windows, so they'd get no mouse events).
+            # Alpha-1 hover pad over where the buttons appear, so the region
+            # gets mouse events even before the circles fade in (fully
+            # transparent pixels of a translucent window are click-through).
             if self.state == "idle":
                 p.setPen(QtCore.Qt.NoPen)
                 p.setBrush(QtGui.QColor(0, 0, 0, 1))
-                p.drawRoundedRect(
-                    QtCore.QRectF(cx - CHIP_W / 2, cy - CHIP_H / 2, CHIP_W, CHIP_H),
-                    CHIP_H / 2, CHIP_H / 2,
-                )
+                pad = self._hover_pad()
+                p.drawRoundedRect(pad, pad.height() / 2, pad.height() / 2)
 
-            rect, radius = self._morph_geo()
-            base_alpha = IDLE_ALPHA if self.state == "idle" else ACTIVE_ALPHA
-            alpha = int(base_alpha + (CHIP_ALPHA - base_alpha) * r)
-            body = list(PILL_RGBA)
-            if self.chip_hovered:
-                body = [c + 12 for c in PILL_RGBA]  # lift on hover
-            p.setPen(QtCore.Qt.NoPen)
-            p.setBrush(QtGui.QColor(body[0], body[1], body[2], alpha))
-            p.drawRoundedRect(rect, radius, radius)
-            if r > 0.05:  # hairline border defines the chip edge crisply
-                pen = QtGui.QPen(QtGui.QColor(*BAR_RGBA[:3], int(46 * r)))
-                pen.setWidthF(1.0)
-                p.setPen(pen)
-                p.setBrush(QtCore.Qt.NoBrush)
+            # Slim pill / live-waveform container. Fades out as the two circular
+            # buttons take over on hover.
+            rect, radius = self._pill_geo()
+            pill_op = (1.0 - r) if self.state == "idle" else 1.0
+            if pill_op > 0.01:
+                p.save()
+                p.setOpacity(pill_op)
+                base_alpha = IDLE_ALPHA if self.state == "idle" else ACTIVE_ALPHA
+                p.setPen(QtCore.Qt.NoPen)
+                p.setBrush(QtGui.QColor(*PILL_RGBA, base_alpha))
                 p.drawRoundedRect(rect, radius, radius)
+                p.restore()
 
             # Waveform: crisp pill-shaped bars (filled rounded rects) rather than
             # soft stroked lines — sharper, more solid, and reads like a hi-res
@@ -446,37 +556,109 @@ def main() -> int:
                     )
                 p.restore()
 
-            # Settings chip contents: vector gear + "Settings" label.
+            # Two separate circular buttons, fading + scaling in on hover.
             if r > 0.02:
                 ease = r * r * (3 - 2 * r)  # smoothstep
+                gear, mic = self._circles()
+                self._paint_circle(p, gear, ease, self.gear_hovered, "gear")
+                self._paint_circle(p, mic, ease, self.mic_hovered, "mic")
+
+            # Each icon's tag rises above it only while that icon is hovered.
+            gear, mic = self._circles()
+            if self.hint_gear > 0.01:
+                self._paint_tag(p, gear.center().x(), self.hint_gear, "gear")
+            if self.hint_mic > 0.01:
+                self._paint_tag(p, mic.center().x(), self.hint_mic, "mic")
+            p.end()
+
+        def _paint_circle(self, p, circ, ease, hovered, kind):
+            """Draw one circular button (gear or mic), scaling in with `ease`."""
+            p.save()
+            p.setOpacity(ease)
+            s = 0.82 + 0.18 * ease
+            c = circ.center()
+            p.translate(c)
+            p.scale(s, s)
+            p.translate(-c.x(), -c.y())
+            face = [v + 10 for v in CIRCLE_RGBA] if hovered else list(CIRCLE_RGBA)
+            p.setPen(QtGui.QPen(QtGui.QColor(*CIRCLE_EDGE, 210 if hovered else 150),
+                                1.0))
+            p.setBrush(QtGui.QColor(*face, 242))
+            p.drawEllipse(circ)
+            col = QtGui.QColor(*ACCENT) if hovered else QtGui.QColor(*BAR_RGBA)
+            ccx, ccy = c.x(), c.y()
+            if kind == "gear":
                 p.save()
-                p.setOpacity(ease)
-                icon_c = QtGui.QColor(*ACCENT) if self.chip_hovered \
-                    else QtGui.QColor(*BAR_RGBA)
-                gx = rect.left() + 17
-                # Gear spins into place as the chip opens — a small, satisfying
-                # settle rather than a distracting continuous spin.
-                p.save()
-                p.translate(gx, cy)
-                p.rotate((1.0 - ease) * -80.0)
+                p.translate(ccx, ccy)
+                p.rotate((1.0 - ease) * -70.0)  # settles into place
                 p.fillPath(
                     _gear_path(QtCore.QPointF(0, 0), GEAR_D / 2,
                                GEAR_D / 2 * 0.66, GEAR_D / 2 * 0.34, teeth=8),
-                    icon_c,
+                    col,
                 )
                 p.restore()
-                p.setPen(QtGui.QColor(*BAR_RGBA))
-                font = p.font()
-                font.setPointSizeF(9.5)
-                font.setLetterSpacing(QtGui.QFont.PercentageSpacing, 104)
-                p.setFont(font)
-                lx = gx + GEAR_D / 2 + 9 + (1.0 - ease) * 6  # slides in slightly
-                p.drawText(
-                    QtCore.QRectF(lx, cy - 9, rect.right() - lx - 8, 18),
-                    QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, "Settings",
-                )
-                p.restore()
-            p.end()
+            else:
+                _draw_mic(p, ccx, ccy, MIC_D, col)
+            p.restore()
+
+        def _paint_tag(self, p, icon_cx, amount, kind):
+            """Draw a floating tag above a circle: "Settings" for the gear, or
+            "Hold <keys> to dictate" (keys as keycaps) for the mic. A small notch
+            points down at the icon."""
+            p.save()
+            p.setOpacity(min(1.0, amount))
+            label_font = p.font()
+            label_font.setPointSizeF(9.0)
+            fm_l = QtGui.QFontMetrics(label_font)
+            gap = 6
+            if kind == "gear":
+                content_w = fm_l.horizontalAdvance("Settings")
+            else:
+                keys = _shortcut_keys(str(self.settings.get("hotkey", "f9")))
+                cap_font = p.font()
+                cap_font.setPointSizeF(8.0)
+                cap_font.setBold(True)
+                fm_c = QtGui.QFontMetrics(cap_font)
+                lead_w = fm_l.horizontalAdvance("Hold")
+                tail_w = fm_l.horizontalAdvance("to dictate")
+                cap_ws = [fm_c.horizontalAdvance(k) + 14 for k in keys]
+                content_w = lead_w + gap + sum(cap_ws) + gap * len(keys) + tail_w
+            pad = 13
+            tag_w = content_w + pad * 2
+            tag_h = HINT_H
+            bottom = (PILL_CY - CIRCLE_D / 2) - 9 + (1.0 - amount) * 6
+            left = max(4, min(icon_cx - tag_w / 2, CANVAS_W - tag_w - 4))
+            tag = QtCore.QRectF(left, bottom - tag_h, tag_w, tag_h)
+
+            p.setPen(QtGui.QPen(QtGui.QColor(*BAR_RGBA[:3], 44), 1.0))
+            p.setBrush(QtGui.QColor(15, 15, 18, 246))
+            p.drawRoundedRect(tag, 10, 10)
+            nx = max(tag.left() + 10, min(icon_cx, tag.right() - 10))
+            notch = QtGui.QPainterPath()
+            notch.moveTo(nx - 5, tag.bottom() - 1)
+            notch.lineTo(nx + 5, tag.bottom() - 1)
+            notch.lineTo(nx, tag.bottom() + 5)
+            notch.closeSubpath()
+            p.fillPath(notch, QtGui.QColor(15, 15, 18, 246))
+
+            tcy = tag.center().y()
+            p.setPen(QtGui.QColor(*BAR_RGBA[:3]))
+            p.setFont(label_font)
+            if kind == "gear":
+                p.drawText(tag, QtCore.Qt.AlignCenter, "Settings")
+            else:
+                x = tag.left() + pad
+                p.drawText(QtCore.QRectF(x, tcy - 9, lead_w, 18),
+                           QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, "Hold")
+                x += lead_w + gap
+                for k in keys:
+                    x = _draw_keycap(p, x, tcy, k, cap_font) + gap
+                p.setPen(QtGui.QColor(*BAR_RGBA[:3]))
+                p.setFont(label_font)
+                p.drawText(QtCore.QRectF(x, tcy - 9, tail_w + 4, 18),
+                           QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft,
+                           "to dictate")
+            p.restore()
 
     # ------------------------------------------------------------- settings
 

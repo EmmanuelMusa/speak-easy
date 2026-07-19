@@ -327,6 +327,27 @@ def too_divergent(raw: str, cleaned: str) -> bool:
     return dropped > limit
 
 
+def capitalize_sentences(text: str, cap_first: bool = True) -> str:
+    """Capitalize the start of each sentence: the very first letter (unless
+    `cap_first` is False, e.g. a mid-sentence insertion) and the first letter
+    after every sentence ender. Single-letter abbreviations ("e.g.", "p.m.")
+    are left alone so they aren't wrongly recased. Idempotent — safe to run on
+    already-correct text.
+
+    Applied to EVERY cleaned result (not just the local fallback): the small
+    cleanup models routinely return lowercase sentence starts, and nothing
+    downstream used to fix them."""
+    if not text:
+        return text
+    if cap_first and text[0].isalpha():
+        text = text[0].upper() + text[1:]
+    return re.sub(
+        r"(?<![.\s][A-Za-z])([.?!]\s+)([a-z])",
+        lambda m: m.group(1) + m.group(2).upper(),
+        text,
+    )
+
+
 def strip_fillers(text: str, capitalize: bool = True, ensure_period: bool = True) -> str:
     """Local, instant cleanup: drop vocal noises, tidy punctuation, capitalize
     sentence starts, ensure a final period. Never touches real words.
@@ -341,15 +362,7 @@ def strip_fillers(text: str, capitalize: bool = True, ensure_period: bool = True
     cleaned = cleaned.strip()
     if not cleaned:
         return ""
-    # Capitalize the very first letter, and after sentence enders — but not
-    # after single-letter abbreviations like "p.m." or "e.g.".
-    if capitalize:
-        cleaned = cleaned[0].upper() + cleaned[1:]
-    cleaned = re.sub(
-        r"(?<![.\s][A-Za-z])([.?!]\s+)([a-z])",
-        lambda m: m.group(1) + m.group(2).upper(),
-        cleaned,
-    )
+    cleaned = capitalize_sentences(cleaned, cap_first=capitalize)
     if ensure_period and cleaned[-1].isalnum():
         cleaned += "."
     return cleaned
@@ -494,6 +507,10 @@ class Cleaner:
         (no-op for non-lists)."""
         text = drop_noise(text)
         text = collapse_ellipses(text)
+        # Guarantee sentence-start capitalization the model may have missed —
+        # but not the first letter when we're continuing a sentence at the caret
+        # (flow_edit handles that lowercase continuation next).
+        text = capitalize_sentences(text, cap_first=not mid_sentence)
         text = flow_edit(text, mid_sentence, continues_after)
         return reformat_enumeration(text) if reformat_ok else text
 
