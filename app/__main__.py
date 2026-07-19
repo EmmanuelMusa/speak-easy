@@ -37,10 +37,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
+    # Always log to a rotating file next to config.toml, so the logs (including
+    # the per-dictation "Done in 0.9s (stt .., clean .., inject ..)" timing) are
+    # findable even when launched with no visible console (a shortcut, pythonw,
+    # an IDE). Also stream to stderr for when there IS a console.
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    try:
+        from logging.handlers import RotatingFileHandler
+        from pathlib import Path
+        log_path = Path(__file__).resolve().parent.parent / "speakeasy.log"
+        handlers.append(RotatingFileHandler(
+            log_path, maxBytes=1_000_000, backupCount=3, encoding="utf-8"))
+    except Exception:
+        pass  # a missing file handler must never stop the app from starting
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
+        handlers=handlers,
     )
 
     from .config import load_config
