@@ -373,7 +373,19 @@ def _split_trailing_from_list(text: str) -> str:
     return "\n".join(lines)
 
 
-def reformat_enumeration(text: str) -> str:
+def _indent_list_items(text: str, indent: str) -> str:
+    """Prepend `indent` to each list-item line (numbered or bulleted) that isn't
+    already indented, so pasted lists match a typed list's indentation. The
+    lead-in and any trailing prose stay flush left."""
+    if not indent:
+        return text
+    return "\n".join(
+        indent + ln if (_LIST_ITEM_RE.match(ln) and not ln[:1].isspace()) else ln
+        for ln in text.split("\n")
+    )
+
+
+def reformat_enumeration(text: str, indent: str = "") -> str:
     """Turn a spoken enumeration into a numbered list, deterministically.
 
     Small local models are unreliable at restructuring already-punctuated
@@ -387,20 +399,23 @@ def reformat_enumeration(text: str) -> str:
     Returns the text unchanged when it isn't an enumeration or is already a
     list, so it is safe to call on everything.
     """
+    def done(s: str) -> str:
+        return _indent_list_items(s, indent)
+
     if _is_list(text):
         # Already a list (usually from the model) — just peel a concluding
         # sentence off the final item if one got glued on.
-        return _split_trailing_from_list(text)
+        return done(_split_trailing_from_list(text))
     if looks_like_enumeration(text):
         marks = list(_ORDINAL_ITEM_RE.finditer(text))
         if len(marks) >= 2:
-            return _build_list(text, marks)
+            return done(_build_list(text, marks))
     marks = list(_CARDINAL_ITEM_RE.finditer(text))
     if len(marks) >= 2 and _is_cardinal_run(marks):
-        return _build_list(text, marks)
+        return done(_build_list(text, marks))
     marks = list(_DIGIT_ITEM_RE.finditer(text))
     if len(marks) >= 2 and _is_digit_run(marks):
-        return _build_list(text, marks)
+        return done(_build_list(text, marks))
     return text
 
 
@@ -632,7 +647,9 @@ class Cleaner:
         # (flow_edit handles that lowercase continuation next).
         text = capitalize_sentences(text, cap_first=not mid_sentence)
         text = flow_edit(text, mid_sentence, continues_after)
-        return reformat_enumeration(text) if reformat_ok else text
+        if not reformat_ok:
+            return text
+        return reformat_enumeration(text, self.cfg.list_indent)
 
     def _ollama_clean(
         self, text: str, context: str | None = None, surrounding=None

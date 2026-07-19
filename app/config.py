@@ -64,6 +64,10 @@ class CleanupConfig:
     # pause punctuation regardless of this setting.
     punctuation_source: str = "model"
     custom_vocabulary: list[str] = field(default_factory=list)
+    # Indentation prepended to each numbered/bulleted list item, so pasted lists
+    # look like the ones your editor makes when you type them. Empty = flush left
+    # (standard markdown); "\t" = one tab; or a run of spaces, e.g. "    ".
+    list_indent: str = ""
 
 
 @dataclass

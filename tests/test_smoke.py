@@ -446,6 +446,16 @@ def test_enumeration_formats_even_with_surrounding_context():
     assert "1." not in c.clean("and then we should head out", surrounding=s)
 
 
+def test_list_indent_is_applied_when_configured():
+    from app.cleanup import reformat_enumeration
+    raw = "My plan. One, do this. Two, do that."
+    # default: flush left
+    assert reformat_enumeration(raw) == "My plan:\n1. Do this.\n2. Do that."
+    # with a tab indent, each item line is indented; lead/trailing are not
+    assert reformat_enumeration(raw, indent="\t") == \
+        "My plan:\n\t1. Do this.\n\t2. Do that."
+
+
 def test_then_joined_ordinals_become_a_list():
     from app.cleanup import reformat_enumeration
     raw = ("There are things to try. Firstly, do this, then secondly, do that "
