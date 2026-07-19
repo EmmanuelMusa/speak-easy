@@ -446,6 +446,25 @@ def test_enumeration_formats_even_with_surrounding_context():
     assert "1." not in c.clean("and then we should head out", surrounding=s)
 
 
+def test_then_joined_ordinals_become_a_list():
+    from app.cleanup import reformat_enumeration
+    raw = ("There are things to try. Firstly, do this, then secondly, do that "
+           "and then thirdly, do the other.")
+    assert reformat_enumeration(raw) == (
+        "There are things to try:\n1. Do this.\n2. Do that.\n3. Do the other.")
+
+
+def test_inline_digit_markers_become_a_multiline_list():
+    from app.cleanup import reformat_enumeration
+    # The model emitted the numbers inline instead of a real list.
+    raw = "My plan. 1. Eat. 2. Sleep. 3. Rest. Then I am done for the day."
+    assert reformat_enumeration(raw) == (
+        "My plan:\n1. Eat.\n2. Sleep.\n3. Rest.\nThen I am done for the day.")
+    # A lone "1." in prose is not a list.
+    assert reformat_enumeration("I ranked 1. in the class.") == \
+        "I ranked 1. in the class."
+
+
 def test_trailing_sentence_split_off_last_list_item():
     from app.cleanup import reformat_enumeration
     # The model glued a closing sentence onto item 3; it must become its own line.

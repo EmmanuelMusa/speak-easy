@@ -230,14 +230,13 @@ _ENUM_STRONG_RE = re.compile(
     re.IGNORECASE,
 )
 
-# The same cues but only where they START an item — at the very beginning, or
-# right after a sentence end OR a comma. Real dictation mixes both separators
-# ("...three ways. Firstly, I'll X. Secondly, I'll Y, thirdly I'll Z."). The
-# ordinal must be a standalone word (\b before it) so "first" inside "first
-# aid" and the like never match. Bare "and third the plan" (ordinal after a
-# word, not a boundary) is left to the LLM, which handles that shape well.
+# The same cues but only where they START an item — at the very beginning, after
+# a sentence end / comma / colon, or after a joining "then / and then / next"
+# (dictation mixes these: "...three ways. Firstly, I'll X, then secondly I'll Y
+# and then thirdly I'll Z."). The ordinal is a standalone word so "first" inside
+# "first aid" never matches.
 _ORDINAL_ITEM_RE = re.compile(
-    r"(?:^|(?<=[.!?]\s)|(?<=[.!?]\n)|(?<=,\s))"
+    r"(?:(?:^|(?<=[.!?])|(?<=,)|(?<=:))\s*|\b(?:(?:and|then|next)\s+)+)"
     r"(?:firstly|secondly|thirdly|fourthly|fifthly|sixthly|seventhly|eighthly|"
     r"first|second|third|fourth|fifth|sixth|seventh|eighth|"
     r"number\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+))"
@@ -252,12 +251,20 @@ _ORDINAL_ITEM_RE = re.compile(
 # one.com mailbox") never matches. Reformatting only fires when the markers form
 # a run starting at one (see _is_cardinal_run), which stray prose numbers don't.
 _CARDINAL_ITEM_RE = re.compile(
-    r"(?:(?:^|(?<=[.!?])|(?<=,)|(?<=:))\s*|\b(?:and|then|next)\s+)"
+    r"(?:(?:^|(?<=[.!?])|(?<=,)|(?<=:))\s*|\b(?:(?:and|then|next)\s+)+)"
     r"(one|two|three|four|five|six|seven|eight|nine|ten)\b[.,]?\s+",
     re.IGNORECASE,
 )
 _CARDINALS = {w: i for i, w in enumerate(
     "one two three four five six seven eight nine ten".split(), 1)}
+
+# Inline digit markers the model sometimes emits instead of a real multi-line
+# list ("... try out. 1. eat ice cream. 2. take pancakes."). Same boundaries as
+# the cardinal markers; reformatted only when they form a run starting at 1.
+_DIGIT_ITEM_RE = re.compile(
+    r"(?:(?:^|(?<=[.!?])|(?<=,)|(?<=:))\s*|\b(?:(?:and|then|next)\s+)+)"
+    r"(\d{1,2})[.)]\s+",
+)
 
 # Spoken domains: "one dot com" -> "one.com". Limited to a known TLD so an
 # ordinary "dot" between words is left alone.
@@ -295,6 +302,11 @@ def _is_cardinal_run(marks) -> bool:
     """True if the matched cardinals are a run starting at one (1, 2, [3...]) —
     what a dictated list looks like; stray prose numbers don't."""
     vals = [_CARDINALS[m.group(1).lower()] for m in marks]
+    return vals[0] == 1 and all(b > a for a, b in zip(vals, vals[1:]))
+
+
+def _is_digit_run(marks) -> bool:
+    vals = [int(m.group(1)) for m in marks]
     return vals[0] == 1 and all(b > a for a, b in zip(vals, vals[1:]))
 
 
@@ -386,6 +398,9 @@ def reformat_enumeration(text: str) -> str:
             return _build_list(text, marks)
     marks = list(_CARDINAL_ITEM_RE.finditer(text))
     if len(marks) >= 2 and _is_cardinal_run(marks):
+        return _build_list(text, marks)
+    marks = list(_DIGIT_ITEM_RE.finditer(text))
+    if len(marks) >= 2 and _is_digit_run(marks):
         return _build_list(text, marks)
     return text
 
