@@ -65,7 +65,8 @@ STT_MODELS = ["tiny.en", "base", "small.en", "medium", "large-v3",
               "large-v3-turbo"]
 STT_ENGINES = ["whisper", "parakeet"]
 PARAKEET_MODELS = ["nemo-parakeet-tdt-0.6b-v2", "nemo-parakeet-tdt-0.6b-v3"]
-OLLAMA_MODELS = ["llama3.1:8b", "llama3.2:3b", "phi3:mini", "mistral:7b"]
+OLLAMA_MODELS = ["qwen2.5:3b", "llama3.2:3b", "llama3.1:8b", "phi3:mini",
+                 "mistral:7b"]
 DELIVERY = ["clipboard", "sendinput"]
 
 FEEDBACK_TAGS = ["misheard word", "wrong punctuation", "over-deleted",
