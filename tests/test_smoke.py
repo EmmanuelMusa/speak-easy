@@ -511,6 +511,25 @@ def test_spoken_dot_only_touches_domains():
         "connect the dot to the line"
 
 
+def test_spoken_punctuation_brackets_and_quotes():
+    from app.cleanup import _apply_spoken_punctuation as f
+    assert f("make it in bracket less wide close bracket now") == \
+        "make it (less wide) now"
+    assert f("the result open parenthesis forty two close parenthesis") == \
+        "the result (forty two)"
+    assert f("open paren maybe close paren we wait") == "(maybe) we wait"
+    assert f("the array open square bracket zero close square bracket") == \
+        "the array [zero]"
+    assert f("she said quote i will handle it unquote today") == \
+        'she said "i will handle it" today'
+    assert f("note in quotes review later end quotes please") == \
+        'note "review later" please'
+    # No closing command -> ordinary speech is left untouched.
+    assert f("i need a quote from the vendor tomorrow") == \
+        "i need a quote from the vendor tomorrow"
+    assert f("open the bracket on the shelf") == "open the bracket on the shelf"
+
+
 def test_app_name_normalized_to_speakeasy():
     from app.cleanup import _normalize_app_name
     assert _normalize_app_name("open speak easy now") == "open SpeakEasy now"

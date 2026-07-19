@@ -286,6 +286,39 @@ def _normalize_app_name(text: str) -> str:
     return _APP_NAME_RE.sub("SpeakEasy", text)
 
 
+# Spoken punctuation commands -> real punctuation, done deterministically (small
+# models handle only some phrasings). Each pairs an opener with a closer and
+# wraps the words between; an unpaired opener ("a quote from the vendor" with no
+# "unquote") never matches, so ordinary speech is untouched. Square/curly run
+# before round so "square bracket" isn't caught by the round rule.
+_SQ_BRACKET_RE = re.compile(
+    r"\b(?:open|in|left)\s+square\s+brackets?\b\s*(.+?)\s*"
+    r"\b(?:close|closed|end|right)\s+square\s+brackets?\b", re.IGNORECASE)
+_CURLY_RE = re.compile(
+    r"\b(?:open|in|left)\s+curly\s+(?:brace|bracket)s?\b\s*(.+?)\s*"
+    r"\b(?:close|closed|end|right)\s+curly\s+(?:brace|bracket)s?\b", re.IGNORECASE)
+_ROUND_BRACKET_RE = re.compile(
+    r"\b(?:open|in|left)\s+(?:round\s+)?(?:brackets?|parenthes[ei]s|parens?)\b\s*"
+    r"(.+?)\s*"
+    r"\b(?:close|closed|end|right)\s+(?:round\s+)?(?:brackets?|parenthes[ei]s|parens?)\b",
+    re.IGNORECASE)
+_QUOTE_CMD_RE = re.compile(
+    r"\b(?:open\s+quote|in\s+quotes?|in\s+quotation\s+marks?|quote)\b\s*(.+?)\s*"
+    r"\b(?:unquote|end\s+quotes?|close\s+quote|end\s+quotation\s+marks?)\b",
+    re.IGNORECASE)
+
+
+def _apply_spoken_punctuation(text: str) -> str:
+    """Turn spoken bracket/quote commands into real punctuation:
+    "open bracket X close bracket" -> "(X)", "open square bracket X close square
+    bracket" -> "[X]", "quote X unquote" / "in quotes X end quotes" -> '"X"'."""
+    text = _SQ_BRACKET_RE.sub(lambda m: "[" + m.group(1).strip() + "]", text)
+    text = _CURLY_RE.sub(lambda m: "{" + m.group(1).strip() + "}", text)
+    text = _ROUND_BRACKET_RE.sub(lambda m: "(" + m.group(1).strip() + ")", text)
+    text = _QUOTE_CMD_RE.sub(lambda m: '"' + m.group(1).strip() + '"', text)
+    return text
+
+
 def _is_list(text: str) -> bool:
     """True if `text` contains a formatted list (numbered or bulleted)."""
     return bool(_LIST_ITEM_RE.search(text))
@@ -595,10 +628,14 @@ class Cleaner:
         resolved for the punctuation_source); `fallback_text` (defaults to
         `model_text`) is what the local strip runs on. Returns the best
         available cleaned form."""
-        model_text = model_text.strip()
+        # Spoken bracket/quote commands -> punctuation, before the model sees
+        # them (and for the offline fallback too), so it's reliable regardless
+        # of the model.
+        model_text = _apply_spoken_punctuation(model_text.strip())
         if not model_text:
             return ""
-        fb = (fallback_text if fallback_text is not None else model_text).strip()
+        fb = _apply_spoken_punctuation(
+            (fallback_text if fallback_text is not None else model_text).strip())
         mid_sentence = surrounding is not None and surrounding.mid_sentence
         continues_after = surrounding is not None and surrounding.continues_after
         local = strip_fillers(
