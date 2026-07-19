@@ -408,6 +408,35 @@ def test_has_speech_gates_silence_and_noise_but_passes_speech():
     assert not has_speech(np.full(int(0.05 * sr), 0.1, dtype=np.float32), sr)
 
 
+def test_cardinal_markers_become_a_numbered_list():
+    from app.cleanup import reformat_enumeration, _apply_spoken_dot
+    raw = ("For my decision. one. I want full attachment resend as a follow-up "
+           "and two. I can tune the one dot com mailbox when I am ready.")
+    out = reformat_enumeration(_apply_spoken_dot(raw))
+    assert out == (
+        "For my decision:\n"
+        "1. I want full attachment resend as a follow-up.\n"
+        "2. I can tune the one.com mailbox when I am ready."
+    )
+
+
+def test_cardinal_reformat_ignores_prose_numbers():
+    from app.cleanup import reformat_enumeration
+    # Not a run starting at one at item boundaries -> left as prose.
+    assert reformat_enumeration("I have one apple and two oranges.") == \
+        "I have one apple and two oranges."
+    assert reformat_enumeration("We meet at two and leave at four.") == \
+        "We meet at two and leave at four."
+
+
+def test_spoken_dot_only_touches_domains():
+    from app.cleanup import _apply_spoken_dot
+    assert _apply_spoken_dot("the one dot com mailbox") == "the one.com mailbox"
+    # A plain "dot" between ordinary words is left alone.
+    assert _apply_spoken_dot("connect the dot to the line") == \
+        "connect the dot to the line"
+
+
 def test_stt_engine_defaults():
     from app.config import SttConfig
     assert SttConfig().engine == "whisper"

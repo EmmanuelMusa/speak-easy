@@ -26,12 +26,6 @@ from .training import TrainingStore
 
 log = logging.getLogger(__name__)
 
-# The start cue waits for real speech before it sounds (see _cue_on_speech), so
-# a silent or spurious hold never beeps. This is how long it waits for speech to
-# begin before giving up on the cue for that press.
-_CUE_MAX_WAIT_S = 2.0
-
-
 def _notify_user(msg: str) -> None:
     """Surface a problem the user must see even with no console. When launched
     from a terminal, print to it; under pythonw (no console) pop a Windows
@@ -103,7 +97,6 @@ class PushToTalkApp:
         self._surrounding: focus.Surrounding | None = None
         self._press_gen = 0  # invalidates surrounding reads from older presses
         self._last_audio: tuple | None = None  # (audio, sr) held for correction capture
-        self._cue_gen = 0  # invalidates a pending speech-gated start cue
 
     # -- hotkey callbacks ------------------------------------------------
 
@@ -115,16 +108,12 @@ class PushToTalkApp:
         if self.recorder.recording:
             return  # key autorepeat: the hold is already in progress
         log.info("Recording... (release %s to dictate)", self.cfg.hotkey.binding)
-        self.recorder.start()
         if self.cfg.audio.start_sound:
-            # Sound the cue only once real speech is heard (not on a blind
-            # press): a silent or spurious hold — a stuck modifier, another app's
-            # shortcut — never beeps, and the thump lands as you start speaking.
-            self._cue_gen += 1
-            gen = self._cue_gen
-            threading.Thread(
-                target=self._cue_on_speech, args=(gen,), daemon=True
-            ).start()
+            # Sound the cue the instant the key goes down — immediate feedback.
+            # (play_start_cue is async: it renders/plays on its own thread.)
+            log.info("Start cue")
+            sound.play_start_cue(self.cfg.audio.start_sound_volume)
+        self.recorder.start()
         # Capture the transcriber once: a live engine switch (_reload_stt runs
         # on a background thread) can swap self.transcriber at any moment, so
         # the capability check and the StreamingSession must see the SAME
@@ -169,26 +158,7 @@ class PushToTalkApp:
             threading.Thread(target=_read_surrounding, daemon=True).start()
         self.overlay.show_recording()
 
-    def _cue_on_speech(self, gen: int) -> None:
-        """Play the start cue the moment real speech is heard during this hold,
-        then stop. A silent or spurious hold never reaches the speech floor, so
-        it never beeps; a released or superseded press bails out. The 'Start
-        cue' log line makes any unexpected cue traceable — hear the sound with
-        no log line and it wasn't Speak Easy's."""
-        floor = self.cfg.audio.silence_floor
-        deadline = time.monotonic() + _CUE_MAX_WAIT_S
-        while time.monotonic() < deadline:
-            if gen != self._cue_gen or not self.recorder.recording:
-                return  # released or a newer press took over
-            if self.recorder.level >= floor:
-                log.info("Start cue")
-                sound.play_start_cue(self.cfg.audio.start_sound_volume)
-                return
-            time.sleep(0.015)
-
     def _on_release(self) -> None:
-        # Invalidate any pending speech-gated cue for this press.
-        self._cue_gen += 1
         if not self.recorder.recording:
             return
         audio = self.recorder.stop()

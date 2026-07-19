@@ -245,6 +245,31 @@ _ORDINAL_ITEM_RE = re.compile(
 )
 
 
+# Bare cardinal numbers used as list markers ("one. do X and two. do Y"). Only
+# at an item boundary — start, after a sentence end, a comma, or a joining
+# "and/then/next" — so a cardinal buried in prose ("I have one apple", "the
+# one.com mailbox") never matches. Reformatting only fires when the markers form
+# a run starting at one (see _is_cardinal_run), which stray prose numbers don't.
+_CARDINAL_ITEM_RE = re.compile(
+    r"(?:(?:^|(?<=[.!?])|(?<=,))\s*|\b(?:and|then|next)\s+)"
+    r"(one|two|three|four|five|six|seven|eight|nine|ten)\b[.,]?\s+",
+    re.IGNORECASE,
+)
+_CARDINALS = {w: i for i, w in enumerate(
+    "one two three four five six seven eight nine ten".split(), 1)}
+
+# Spoken domains: "one dot com" -> "one.com". Limited to a known TLD so an
+# ordinary "dot" between words is left alone.
+_DOMAIN_DOT_RE = re.compile(
+    r"\b([A-Za-z0-9-]+)\s+dot\s+(com|net|org|io|co|edu|gov|dev|app|ai|uk|ng)\b",
+    re.IGNORECASE,
+)
+
+
+def _apply_spoken_dot(text: str) -> str:
+    return _DOMAIN_DOT_RE.sub(lambda m: f"{m.group(1)}.{m.group(2)}", text)
+
+
 def _is_list(text: str) -> bool:
     """True if `text` contains a formatted list (numbered or bulleted)."""
     return bool(_LIST_ITEM_RE.search(text))
@@ -256,25 +281,17 @@ def looks_like_enumeration(text: str) -> bool:
     return len(_ENUM_STRONG_RE.findall(text)) >= 2
 
 
-def reformat_enumeration(text: str) -> str:
-    """Turn a spoken enumeration into a numbered list, deterministically.
+def _is_cardinal_run(marks) -> bool:
+    """True if the matched cardinals are a run starting at one (1, 2, [3...]) —
+    what a dictated list looks like; stray prose numbers don't."""
+    vals = [_CARDINALS[m.group(1).lower()] for m in marks]
+    return vals[0] == 1 and all(b > a for a, b in zip(vals, vals[1:]))
 
-    Small local models are unreliable at restructuring already-punctuated
-    sentences ("Firstly, I'll X. Secondly, I'll Y.") into a list — one model
-    does it, another leaves it inline, and the exact wording flips the result.
-    So we don't ask them to: once the text clearly enumerates (2+ ordinal cues
-    at sentence starts), we build the list ourselves. The lead-in before the
-    first ordinal becomes a "…:" line; each ordinal-led sentence becomes a
-    numbered item with the ordinal word removed and everything else kept.
 
-    Returns the text unchanged when it isn't an enumeration or is already a
-    list, so it is safe to call on everything.
-    """
-    if _is_list(text) or not looks_like_enumeration(text):
-        return text
-    marks = list(_ORDINAL_ITEM_RE.finditer(text))
-    if len(marks) < 2:
-        return text
+def _build_list(text: str, marks) -> str:
+    """Turn `text` split at `marks` into a numbered list: the lead-in before the
+    first marker becomes a '…:' line, each marker-led span becomes an item with
+    the marker word dropped and everything else kept."""
     lead = text[: marks[0].start()].strip()
     items: list[str] = []
     for i, m in enumerate(marks):
@@ -292,6 +309,32 @@ def reformat_enumeration(text: str) -> str:
     lead = lead.rstrip(" .,:;")
     prefix = f"{lead}:\n" if lead else ""
     return prefix + "\n".join(f"{i + 1}. {it}" for i, it in enumerate(items))
+
+
+def reformat_enumeration(text: str) -> str:
+    """Turn a spoken enumeration into a numbered list, deterministically.
+
+    Small local models are unreliable at restructuring already-punctuated
+    sentences into a list — one model does it, another leaves it inline. So we
+    don't ask them to: once the text clearly enumerates we build the list here.
+    Two shapes are recognised — ordinal markers ("firstly… secondly…", "number
+    one… number two…") and bare cardinals used as markers ("one… and two…") —
+    the latter only when they form a run starting at one, so prose numbers are
+    never touched.
+
+    Returns the text unchanged when it isn't an enumeration or is already a
+    list, so it is safe to call on everything.
+    """
+    if _is_list(text):
+        return text
+    if looks_like_enumeration(text):
+        marks = list(_ORDINAL_ITEM_RE.finditer(text))
+        if len(marks) >= 2:
+            return _build_list(text, marks)
+    marks = list(_CARDINAL_ITEM_RE.finditer(text))
+    if len(marks) >= 2 and _is_cardinal_run(marks):
+        return _build_list(text, marks)
+    return text
 
 
 def too_divergent(raw: str, cleaned: str) -> bool:
@@ -509,6 +552,7 @@ class Cleaner:
         (no-op for non-lists)."""
         text = drop_noise(text)
         text = collapse_ellipses(text)
+        text = _apply_spoken_dot(text)   # "one dot com" -> "one.com"
         # Guarantee sentence-start capitalization the model may have missed —
         # but not the first letter when we're continuing a sentence at the caret
         # (flow_edit handles that lowercase continuation next).

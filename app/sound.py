@@ -35,22 +35,24 @@ def _render_cue(volume: float) -> bytes:
     onset gives the attack "presence" that small speakers reproduce; tanh drive
     adds harmonics so the low body carries too. 16-bit mono WAV bytes.
     """
-    dur = 0.12
+    dur = 0.14
     n = int(_SAMPLE_RATE * dur)
-    f_start, f_end = 200.0, 120.0
+    f_start, f_end = 170.0, 92.0                    # deeper than before
     frames = bytearray()
     phase = 0.0
     for i in range(n):
         t = i / _SAMPLE_RATE
-        f = f_end + (f_start - f_end) * math.exp(-t / 0.018)
+        f = f_end + (f_start - f_end) * math.exp(-t / 0.020)
         phase += 2 * math.pi * f / _SAMPLE_RATE
         attack = min(1.0, t / 0.0015)               # ~1.5 ms attack
-        body = math.sin(phase) * math.exp(-t / 0.032)  # fast, percussive decay
-        click = math.sin(2 * math.pi * 620 * t) * math.exp(-t / 0.005) * 0.4
-        release = min(1.0, (dur - t) / 0.010)       # clean cut, no lingering tail
+        body = math.sin(phase) * math.exp(-t / 0.040)  # punchy, a touch more body
+        click = math.sin(2 * math.pi * 520 * t) * math.exp(-t / 0.005) * 0.35
+        release = min(1.0, (dur - t) / 0.012)       # clean cut, no lingering tail
         val = (body + click) * attack * release
-        val = math.tanh(val * (2.6 + 2.2 * volume))  # drive -> punch + harmonics
-        val *= (0.72 + 0.28 * volume)               # loud enough to notice
+        # Heavier drive: more harmonics of the deep fundamental -> the ear reads
+        # it as deep AND it's plainly louder on small speakers.
+        val = math.tanh(val * (4.0 + 2.0 * volume))
+        val *= 0.92 * release
         frames += struct.pack("<h", int(max(-1.0, min(1.0, val)) * 32767))
     out = io.BytesIO()
     with wave.open(out, "wb") as w:
