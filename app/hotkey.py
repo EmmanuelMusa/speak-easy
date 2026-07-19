@@ -469,33 +469,32 @@ class PushToTalkApp:
             threading.Thread(target=focus.warmup, daemon=True).start()
         self.overlay.show_idle()  # slim ready-bar at the bottom of the screen
         self.overlay.send_settings(self._settings_snapshot())
-        log.info("Loading STT engine '%s'...", self.cfg.stt.engine)
-        stt_error: str | None = None
-        try:
-            self.transcriber._load()
-        except Exception as exc:
-            stt_error = str(exc)
-            log.error("STT engine failed to load (%s)", exc)
+
+        # Warm the STT engine on a background thread: load AND run one dummy
+        # inference, so the model is loaded and its graph/GPU kernels are already
+        # compiled before the first real dictation (otherwise the first one pays
+        # that one-time cost and feels slow). The hotkey registers immediately —
+        # a dictation in the first second or two still works, it just triggers
+        # the (locked) load itself.
+        def _warm_stt() -> None:
+            log.info("Warming up STT engine '%s'...", self.cfg.stt.engine)
+            try:
+                self.transcriber.warmup()
+                log.info("STT engine '%s' warm and ready", self.cfg.stt.engine)
+            except Exception as exc:
+                log.error("STT engine failed to load (%s)", exc)
+                _notify_user(
+                    f"Speak Easy is running, but the '{self.cfg.stt.engine}' "
+                    f"speech engine failed to load, so dictation won't work "
+                    f"until it's fixed. Check the log, then restart — or pick a "
+                    f"different engine in Settings.\n\n{exc}"
+                )
+        threading.Thread(target=_warm_stt, daemon=True).start()
 
         gh.register_hotkeys([
             [self.cfg.hotkey.binding, self._on_press, self._on_release, False],
         ])
         gh.start_checking_hotkeys()
-        if stt_error is not None:
-            # The overlay still shows a "ready" pill, so without this a load
-            # failure looks like the app works — until every dictation silently
-            # no-ops. Warn on a background thread so a modal box can't block the
-            # main loop from starting.
-            threading.Thread(
-                target=_notify_user,
-                args=(
-                    f"Speak Easy is running, but the '{self.cfg.stt.engine}' "
-                    f"speech engine failed to load, so dictation won't work "
-                    f"until it's fixed. Check the log, then restart — or pick a "
-                    f"different engine in Settings.\n\n{stt_error}",
-                ),
-                daemon=True,
-            ).start()
         log.info(
             "Speak Easy ready. Hold '%s' to dictate; Ctrl+C here or the "
             "Quit button in settings to quit.",

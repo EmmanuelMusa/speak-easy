@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -67,9 +68,25 @@ class ParakeetTranscriber:
     def __init__(self, cfg: SttConfig):
         self.cfg = cfg
         self._model = None
+        self._load_lock = threading.Lock()
+
+    def warmup(self) -> None:
+        """Load the model AND run one tiny inference so the first real dictation
+        isn't the one that pays ONNX Runtime's graph-optimization / GPU
+        kernel-compilation cost. Load errors propagate; the dummy inference is
+        best-effort."""
+        self._load()
+        try:
+            self.transcribe(np.zeros(int(0.3 * 16000), dtype=np.float32))
+        except Exception as exc:  # a warm-up miss must never break startup
+            log.debug("Parakeet warm-up inference skipped: %s", exc)
 
     def _load(self):
-        if self._model is None:
+        if self._model is not None:
+            return self._model
+        with self._load_lock:
+            if self._model is not None:  # another thread loaded it first
+                return self._model
             try:
                 import onnx_asr
             except ImportError as exc:

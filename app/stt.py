@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -234,10 +235,30 @@ class Transcriber:
         self._model = None
         self._device = None
         self._force_cpu = False
+        self._load_lock = threading.Lock()
+
+    def warmup(self) -> None:
+        """Load the model AND run one tiny inference. The first inference pays a
+        one-time graph-optimization / GPU kernel-compilation cost that `_load`
+        alone doesn't trigger — doing it at startup keeps the first real
+        dictation from being the slow one. Load errors propagate (the caller
+        surfaces them); the dummy inference is best-effort."""
+        self._load()
+        try:
+            self.transcribe_segments(
+                np.zeros(int(0.3 * 16000), dtype=np.float32))
+        except Exception as exc:  # a warm-up miss must never break startup
+            log.debug("STT warm-up inference skipped: %s", exc)
 
     def _load(self):
         if self._model is not None:
             return self._model
+        with self._load_lock:
+            if self._model is not None:  # another thread loaded it first
+                return self._model
+            return self._load_locked()
+
+    def _load_locked(self):
         _register_nvidia_dlls()
         from faster_whisper import WhisperModel  # lazy: heavy import
 

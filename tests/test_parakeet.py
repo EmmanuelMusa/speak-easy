@@ -43,6 +43,17 @@ def test_load_is_cached(monkeypatch):
     fake.load_model.assert_called_once()  # model loaded once, reused
 
 
+def test_warmup_loads_and_runs_a_dummy_inference(monkeypatch):
+    # Warm-up must load the model AND run one inference, so the first real
+    # dictation doesn't pay the graph/GPU first-inference cost.
+    fake, model = _install_fake_onnx_asr("x")
+    from app.parakeet import ParakeetTranscriber
+    t = ParakeetTranscriber(SttConfig(engine="parakeet"))
+    t.warmup()
+    fake.load_model.assert_called_once()
+    model.recognize.assert_called_once()  # the dummy inference ran
+
+
 def test_make_transcriber_selects_engine():
     from app.stt import make_transcriber, Transcriber
     _install_fake_onnx_asr()
