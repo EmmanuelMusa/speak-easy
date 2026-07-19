@@ -433,6 +433,7 @@ def main() -> int:
                 d.refresh()
                 d.ensurePolished()
                 d.resize(d.sizeHint())
+                QtWidgets.QApplication.processEvents()  # flush resize -> reflow
                 d.grab().save(arg)
                 d.deleteLater()
                 emit({"type": "shot_ok"})
@@ -1003,6 +1004,56 @@ def main() -> int:
 
     # ------------------------------------------------------------- review
 
+    class RingProgress(QtWidgets.QWidget):
+        """Circular progress ring with the current count in its centre — the
+        hero stat for voice-training data, echoing the app's circular motifs."""
+
+        def __init__(self, d: int = 96):
+            super().__init__()
+            self._d = d
+            self._val = 0
+            self._max = 1
+            self.setFixedSize(d, d)
+
+        def set_values(self, val: int, mx: int):
+            self._val = max(0, int(val))
+            self._max = max(1, int(mx))
+            self.update()
+
+        def paintEvent(self, _e):
+            p = QtGui.QPainter(self)
+            p.setRenderHint(QtGui.QPainter.Antialiasing)
+            p.setRenderHint(QtGui.QPainter.TextAntialiasing)
+            w = 9.0
+            ring = QtCore.QRectF(w / 2 + 1, w / 2 + 1,
+                                 self._d - w - 2, self._d - w - 2)
+            track = QtGui.QPen(QtGui.QColor(0x2a, 0x2a, 0x33), w)
+            track.setCapStyle(QtCore.Qt.RoundCap)
+            p.setPen(track)
+            p.drawArc(ring, 0, 360 * 16)
+            frac = min(1.0, self._val / self._max)
+            done = frac >= 1.0
+            arc = QtGui.QPen(QtGui.QColor(0x74, 0xd0, 0x9a) if done
+                             else QtGui.QColor(0x6e, 0x96, 0xff), w)
+            arc.setCapStyle(QtCore.Qt.RoundCap)
+            p.setPen(arc)
+            p.drawArc(ring, 90 * 16, -int(round(360 * frac)) * 16)
+            p.setPen(QtGui.QColor(0xff, 0xff, 0xff))
+            f = p.font()
+            f.setPointSizeF(19)
+            f.setBold(True)
+            p.setFont(f)
+            p.drawText(QtCore.QRectF(0, self._d * 0.24, self._d, self._d * 0.4),
+                       QtCore.Qt.AlignCenter, str(self._val))
+            p.setPen(QtGui.QColor(0x83, 0x83, 0x8c))
+            f2 = p.font()
+            f2.setPointSizeF(9)
+            f2.setBold(False)
+            p.setFont(f2)
+            p.drawText(QtCore.QRectF(0, self._d * 0.54, self._d, self._d * 0.24),
+                       QtCore.Qt.AlignCenter, f"of {self._max}")
+            p.end()
+
     class ReviewDialog(QtWidgets.QWidget):
         """Browse and prune what training mode has learned: correction
         examples and auto-learned vocabulary. Edits the same files the app
@@ -1013,56 +1064,85 @@ def main() -> int:
             self.setWindowTitle("Review learnings")
             self.setObjectName("root")
             self.setStyleSheet(DIALOG_QSS)
-            self.setMinimumSize(470, 470)
+            self.setMinimumSize(480, 520)
             self.target = max(1, int(target_pairs))
             from .training import TrainingStore
             self.store = TrainingStore()
 
             outer = QtWidgets.QVBoxLayout(self)
             outer.setContentsMargins(20, 18, 20, 16)
-            outer.setSpacing(8)
+            outer.setSpacing(11)
 
-            title = QtWidgets.QLabel("Review learnings")
-            title.setObjectName("title")
-            outer.addWidget(title)
+            # Header: brand mark + name.
+            header = QtWidgets.QHBoxLayout()
+            header.setSpacing(12)
+            header.addWidget(BrandMark())
+            brand = QtWidgets.QVBoxLayout()
+            brand.setSpacing(1)
+            t = QtWidgets.QLabel("Review learnings")
+            t.setObjectName("brand")
+            s = QtWidgets.QLabel("What Speak Easy has picked up from you")
+            s.setObjectName("brandsub")
+            brand.addWidget(t)
+            brand.addWidget(s)
+            header.addLayout(brand)
+            header.addStretch(1)
+            outer.addLayout(header)
 
-            pairs_lbl = QtWidgets.QLabel("VOICE TRAINING DATA")
-            pairs_lbl.setProperty("role", "section")
-            pairs_lbl.setToolTip(
-                "(audio, what-you-actually-said) pairs saved for a future "
-                "voice fine-tune")
-            outer.addWidget(pairs_lbl)
+            def card(title):
+                fr = QtWidgets.QFrame()
+                fr.setObjectName("card")
+                lay = QtWidgets.QVBoxLayout(fr)
+                lay.setContentsMargins(15, 12, 15, 14)
+                lay.setSpacing(9)
+                if title:
+                    tl = QtWidgets.QLabel(title)
+                    tl.setProperty("role", "card")
+                    lay.addWidget(tl)
+                outer.addWidget(fr)
+                return fr, lay
+
+            # Voice-training hero: ring + count + hint.
+            fr, lay = card("VOICE TRAINING")
+            fr.setToolTip("(audio, what-you-actually-said) pairs saved for a "
+                          "future voice fine-tune")
+            hrow = QtWidgets.QHBoxLayout()
+            hrow.setSpacing(16)
+            self.ring = RingProgress()
+            hrow.addWidget(self.ring)
+            col = QtWidgets.QVBoxLayout()
+            col.setSpacing(4)
+            col.addStretch(1)
             self.pairs_count = QtWidgets.QLabel()
             self.pairs_count.setStyleSheet(
-                "color:#ffffff;font-size:15px;font-weight:700;")
-            outer.addWidget(self.pairs_count)
-            self.pairs_bar = QtWidgets.QProgressBar()
-            self.pairs_bar.setTextVisible(False)
-            self.pairs_bar.setFixedHeight(8)
-            self.pairs_bar.setStyleSheet(
-                "QProgressBar{background:#232327;border:1px solid #33333a;"
-                "border-radius:5px;}"
-                "QProgressBar::chunk{background:#6e96ff;border-radius:5px;}")
-            outer.addWidget(self.pairs_bar)
+                "color:#ffffff;font-size:16px;font-weight:700;")
             self.pairs_hint = QtWidgets.QLabel()
-            self.pairs_hint.setObjectName("subtitle")
+            self.pairs_hint.setObjectName("brandsub")
             self.pairs_hint.setWordWrap(True)
-            outer.addWidget(self.pairs_hint)
-            outer.addSpacing(4)
+            col.addWidget(self.pairs_count)
+            col.addWidget(self.pairs_hint)
+            col.addStretch(1)
+            hrow.addLayout(col, 1)
+            lay.addLayout(hrow)
 
-            corr_lbl = QtWidgets.QLabel("CORRECTION EXAMPLES")
-            corr_lbl.setProperty("role", "section")
-            corr_lbl.setToolTip("Taught to the cleanup model as few-shot examples")
-            outer.addWidget(corr_lbl)
+            # Corrections list.
+            fr_c, lay_c = card("CORRECTIONS")
+            fr_c.setToolTip("Taught to the cleanup model as few-shot examples")
             self.corr_list = QtWidgets.QListWidget()
-            outer.addWidget(self.corr_list, 3)
+            lay_c.addWidget(self.corr_list)
+            outer.setStretchFactor(fr_c, 3)
 
-            vocab_lbl = QtWidgets.QLabel("LEARNED VOCABULARY")
-            vocab_lbl.setProperty("role", "section")
-            vocab_lbl.setToolTip("Words the model must preserve exactly")
-            outer.addWidget(vocab_lbl)
+            # Vocabulary list.
+            fr_v, lay_v = card("VOCABULARY")
+            fr_v.setToolTip("Words the model must preserve exactly")
             self.vocab_list = QtWidgets.QListWidget()
-            outer.addWidget(self.vocab_list, 1)
+            lay_v.addWidget(self.vocab_list)
+            outer.setStretchFactor(fr_v, 1)
+
+            for lw in (self.corr_list, self.vocab_list):
+                lw.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+                lw.setWordWrap(True)
+                lw.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
 
             close = QtWidgets.QPushButton("Close")
             close.setCursor(QtCore.Qt.PointingHandCursor)
@@ -1072,48 +1152,75 @@ def main() -> int:
         def _row(self, text: str, on_delete) -> QtWidgets.QWidget:
             w = QtWidgets.QWidget()
             lay = QtWidgets.QHBoxLayout(w)
-            lay.setContentsMargins(4, 2, 4, 2)
+            lay.setContentsMargins(6, 4, 6, 4)
+            lay.setSpacing(8)
             label = QtWidgets.QLabel(text)
             label.setWordWrap(True)
             btn = QtWidgets.QPushButton("Forget")
-            btn.setFixedWidth(70)
+            btn.setObjectName("change")
+            btn.setFixedWidth(68)
+            btn.setCursor(QtCore.Qt.PointingHandCursor)
             btn.clicked.connect(on_delete)
             lay.addWidget(label, 1)
-            lay.addWidget(btn)
+            lay.addWidget(btn, 0, QtCore.Qt.AlignTop)
             return w
 
         def _add(self, listw, text, on_delete):
             item = QtWidgets.QListWidgetItem(listw)
             row = self._row(text, on_delete)
-            item.setSizeHint(row.sizeHint())
             listw.addItem(item)
             listw.setItemWidget(item, row)
 
+        def _reflow(self):
+            """Size each list row to the viewport so its text wraps instead of
+            being clipped, and its item grows to the wrapped height."""
+            for listw in (self.corr_list, self.vocab_list):
+                w = max(60, listw.viewport().width())
+                for i in range(listw.count()):
+                    row = listw.itemWidget(listw.item(i))
+                    if row is None:
+                        continue  # plain empty-state item
+                    row.setFixedWidth(w)
+                    row.adjustSize()
+                    listw.item(i).setSizeHint(QtCore.QSize(w, row.sizeHint().height()))
+
+        def resizeEvent(self, e):
+            super().resizeEvent(e)
+            self._reflow()
+
         def refresh(self):
             n = self.store.trainable_pair_count()
-            self.pairs_count.setText(f"{n} / {self.target} pairs")
-            self.pairs_bar.setMaximum(self.target)
-            self.pairs_bar.setValue(min(n, self.target))
+            self.ring.set_values(n, self.target)
             if n >= self.target:
-                self.pairs_hint.setText("Ready to fine-tune your voice.")
+                self.pairs_count.setText("Ready to fine-tune")
+                self.pairs_hint.setText(
+                    "You've collected enough voice data to fine-tune the speech "
+                    "model to your voice.")
             else:
+                self.pairs_count.setText(f"{n} of {self.target} pairs")
                 self.pairs_hint.setText(
                     f"{self.target - n} more corrections with “what you actually "
                     "said” to reach the fine-tuning target.")
             self.corr_list.clear()
             self.vocab_list.clear()
+
+            def short(s, n=150):
+                s = " ".join(str(s).split())
+                return s if len(s) <= n else s[: n - 1].rstrip() + "…"
+
             for e in reversed(self.store.corrections(n=None)):
                 ts = e.get("ts")
-                text = f"“{e.get('raw','')}”  →  “{e.get('ideal','')}”"
+                text = f"“{short(e.get('raw',''))}”  →  “{short(e.get('ideal',''))}”"
                 self._add(self.corr_list, text,
                           lambda _=False, ts=ts: self._forget_corr(ts))
-            for term in self.store.learned_vocab():
+            for term in dict.fromkeys(self.store.learned_vocab()):
                 self._add(self.vocab_list, term,
                           lambda _=False, t=term: self._forget_vocab(t))
             if self.corr_list.count() == 0:
                 self.corr_list.addItem("No corrections yet.")
             if self.vocab_list.count() == 0:
                 self.vocab_list.addItem("No learned words yet.")
+            self._reflow()
 
         def _forget_corr(self, ts):
             self.store.delete_correction(ts)
