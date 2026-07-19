@@ -913,6 +913,11 @@ def main() -> int:
             self.ollama_model.setEditable(True)
             self.ollama_model.addItems(OLLAMA_MODELS)
             self.cleanup = QtWidgets.QCheckBox("Clean up with the local AI model")
+            self.keep_warm = QtWidgets.QCheckBox("Keep the models warm while idle")
+            self.keep_warm.setToolTip(
+                "Every few minutes, nudge the speech + cleanup models so they "
+                "don't unload while idle — so the first dictation after a pause "
+                "isn't slow. Uses a little VRAM and power.")
             self.delivery = QtWidgets.QComboBox()
             self.delivery.addItems(DELIVERY)
 
@@ -983,6 +988,7 @@ def main() -> int:
             behave = card("BEHAVIOR")
             behave.addWidget(self.training)
             behave.addWidget(self.replace)
+            behave.addWidget(self.keep_warm)
             field(behave, "Text delivery", self.delivery)
             self.review_btn = QtWidgets.QPushButton("Review what it has learned…")
             self.review_btn.setObjectName("link")
@@ -1048,6 +1054,7 @@ def main() -> int:
                 str(values.get("parakeet_model", "nemo-parakeet-tdt-0.6b-v2")))
             self.ollama_model.setCurrentText(str(values.get("ollama_model", "llama3.1:8b")))
             self.cleanup.setChecked(bool(values.get("cleanup_enabled", True)))
+            self.keep_warm.setChecked(bool(values.get("keep_warm", False)))
             self.delivery.setCurrentText(str(values.get("delivery_method", "clipboard")))
             self._target = int(values.get("target_pairs", 200))
             self._sync_engine_fields()
@@ -1064,6 +1071,7 @@ def main() -> int:
                     "parakeet_model": self.parakeet_model.currentText(),
                     "ollama_model": self.ollama_model.currentText().strip(),
                     "cleanup_enabled": self.cleanup.isChecked(),
+                    "keep_warm": self.keep_warm.isChecked(),
                     "delivery_method": self.delivery.currentText(),
                 },
             })

@@ -34,6 +34,37 @@ def test_invalid_dangling_plus():
     assert not _binding_is_valid("control +")
 
 
+def test_keep_warm_default_off():
+    from app.config import Config
+    assert Config().performance.keep_warm is False
+
+
+def test_keep_warm_ping_nudges_stt_and_ollama():
+    from unittest.mock import MagicMock
+    import app.hotkey as hk
+    from app.config import Config
+
+    fake = MagicMock()
+    fake.cfg = Config()
+    fake.cfg.cleanup.enabled = True
+    hk.PushToTalkApp._keep_warm_ping(fake)
+    fake.transcriber.transcribe.assert_called_once()   # STT nudged
+    fake.cleaner.warmup.assert_called_once()            # Ollama nudged
+
+
+def test_keep_warm_ping_skips_ollama_when_cleanup_off():
+    from unittest.mock import MagicMock
+    import app.hotkey as hk
+    from app.config import Config
+
+    fake = MagicMock()
+    fake.cfg = Config()
+    fake.cfg.cleanup.enabled = False
+    hk.PushToTalkApp._keep_warm_ping(fake)
+    fake.transcriber.transcribe.assert_called_once()
+    fake.cleaner.warmup.assert_not_called()
+
+
 def test_start_cue_is_debounced(monkeypatch):
     # A brief accidental trigger (released before the threshold) must NOT beep;
     # a genuine hold must. Regression: an accidental Ctrl+Shift+Space blip was

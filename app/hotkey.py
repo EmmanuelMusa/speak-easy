@@ -293,6 +293,7 @@ class PushToTalkApp:
             "ollama_model": self.cfg.cleanup.ollama_model,
             "cleanup_enabled": self.cfg.cleanup.enabled,
             "delivery_method": self.cfg.injection.delivery_method,
+            "keep_warm": self.cfg.performance.keep_warm,
             "target_pairs": self.cfg.training.target_pairs,
         }
 
@@ -334,6 +335,9 @@ class PushToTalkApp:
         self.cfg.injection.delivery_method = values.get(
             "delivery_method", self.cfg.injection.delivery_method
         )
+        self.cfg.performance.keep_warm = bool(
+            values.get("keep_warm", self.cfg.performance.keep_warm)
+        )
 
         save_config_updates({
             "training": {
@@ -351,6 +355,7 @@ class PushToTalkApp:
                 "enabled": self.cfg.cleanup.enabled,
             },
             "injection": {"delivery_method": self.cfg.injection.delivery_method},
+            "performance": {"keep_warm": self.cfg.performance.keep_warm},
         })
 
         if self.cfg.hotkey.binding != old_hotkey:
@@ -446,6 +451,38 @@ class PushToTalkApp:
         self.transcriber = new
         log.info("Speech engine switched to '%s'", attempted)
 
+    # -- keep-warm ----------------------------------------------------------
+
+    def _keep_warm_loop(self) -> None:
+        """When enabled, periodically nudge the STT engine and Ollama so neither
+        unloads while idle — so the first dictation after a long pause is fast.
+        One persistent thread that re-reads the toggle each cycle, so flipping it
+        in Settings takes effect without a restart."""
+        while True:
+            interval = max(30.0, self.cfg.performance.keep_warm_interval_seconds)
+            if self._quit.wait(interval):
+                return
+            if not self.cfg.performance.keep_warm:
+                continue
+            # Never contend with an active dictation.
+            if self._busy.locked() or self.recorder.recording:
+                continue
+            self._keep_warm_ping()
+
+    def _keep_warm_ping(self) -> None:
+        import numpy as np
+        silence = np.zeros(int(0.2 * self.cfg.audio.sample_rate), dtype=np.float32)
+        try:
+            self.transcriber.transcribe(silence)
+        except Exception as exc:
+            log.debug("keep-warm STT ping failed: %s", exc)
+        if self.cfg.cleanup.enabled:
+            try:
+                self.cleaner.warmup()  # a 1-token generate resets Ollama's keep_alive
+            except Exception as exc:
+                log.debug("keep-warm Ollama ping failed: %s", exc)
+        log.debug("keep-warm ping done")
+
     # -- main loop ---------------------------------------------------------
 
     def run(self) -> None:
@@ -490,6 +527,9 @@ class PushToTalkApp:
                     f"different engine in Settings.\n\n{exc}"
                 )
         threading.Thread(target=_warm_stt, daemon=True).start()
+        # Keep-warm loop (a no-op until the toggle is on) so an idle pause never
+        # forces a slow cold reload of the STT or cleanup model.
+        threading.Thread(target=self._keep_warm_loop, daemon=True).start()
 
         gh.register_hotkeys([
             [self.cfg.hotkey.binding, self._on_press, self._on_release, False],

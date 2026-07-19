@@ -137,6 +137,17 @@ class AudioConfig:
 
 
 @dataclass
+class PerformanceConfig:
+    # Periodically run a tiny idle inference on the STT engine and ping Ollama,
+    # so neither unloads and the first dictation after a long pause stays fast.
+    # Off by default: it holds VRAM and uses a little power while you're idle.
+    keep_warm: bool = False
+    # Seconds between keep-warm pings. Must be under Ollama's keep_alive (30m)
+    # to stop it unloading; a few minutes is plenty.
+    keep_warm_interval_seconds: float = 240.0
+
+
+@dataclass
 class Config:
     stt: SttConfig = field(default_factory=SttConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
@@ -146,6 +157,7 @@ class Config:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
+    performance: PerformanceConfig = field(default_factory=PerformanceConfig)
 
 
 def _section(data: dict, name: str, cls):
@@ -170,6 +182,7 @@ def load_config(path: str | Path | None = None) -> Config:
         training=_section(data, "training", TrainingConfig),
         context=_section(data, "context", ContextConfig),
         audio=_section(data, "audio", AudioConfig),
+        performance=_section(data, "performance", PerformanceConfig),
     )
     if cfg.cleanup.punctuation_source not in ("model", "pauses"):
         log.warning(
