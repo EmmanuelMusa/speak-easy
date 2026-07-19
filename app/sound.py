@@ -26,33 +26,31 @@ _cache: dict[float, bytes] = {}
 
 
 def _render_cue(volume: float) -> bytes:
-    """A deep, punchy 'thump' — a kick-drum-like cue rather than a chime, so it
-    reads as bass and doesn't blend in with Windows' high notification sounds.
+    """A short, punchy notification 'thump' — a soft percussive knock, not a
+    fading tone. The trick to reading as a *thump* rather than "something dying
+    out" is a fast, percussive envelope: near-instant attack, a SHORT decay, and
+    a clean cut — so it lands as one discrete hit and is gone.
 
-    A pure low tone is inaudible on laptop speakers, so we build the thump from
-    a fast downward pitch sweep (≈150 Hz → 55 Hz) with a quick attack and
-    exponential decay, then soft-saturate it (tanh). The saturation adds
-    harmonics of the low fundamental that small speakers CAN reproduce, so the
-    ear still perceives the deep pitch (missing-fundamental effect). 16-bit mono.
+    A quick pitch drop (≈200 → 120 Hz) gives the body; a tiny high click at the
+    onset gives the attack "presence" that small speakers reproduce; tanh drive
+    adds harmonics so the low body carries too. 16-bit mono WAV bytes.
     """
-    dur = 0.22
+    dur = 0.12
     n = int(_SAMPLE_RATE * dur)
-    # Sweep from an audible mid pitch DOWN to a deep one: the mid start carries
-    # on small speakers (which roll off below ~200 Hz), the low end gives the
-    # "thump". Slow enough to spend real time in the audible band.
-    f_start, f_end = 330.0, 72.0
+    f_start, f_end = 200.0, 120.0
     frames = bytearray()
     phase = 0.0
     for i in range(n):
         t = i / _SAMPLE_RATE
-        f = f_end + (f_start - f_end) * math.exp(-t / 0.045)
+        f = f_end + (f_start - f_end) * math.exp(-t / 0.018)
         phase += 2 * math.pi * f / _SAMPLE_RATE
-        attack = min(1.0, t / 0.003)         # ~3 ms soft attack (no hard click)
-        decay = math.exp(-t / 0.085)         # body of the thump
-        release = min(1.0, (dur - t) / 0.012)  # fade the tail to zero (no click)
-        val = math.sin(phase) * attack * decay
-        val = math.tanh(val * (2.2 + 2.6 * volume))  # drive -> audible harmonics
-        val *= (0.6 + 0.4 * volume) * release  # level tracks setting; clean tail
+        attack = min(1.0, t / 0.0015)               # ~1.5 ms attack
+        body = math.sin(phase) * math.exp(-t / 0.032)  # fast, percussive decay
+        click = math.sin(2 * math.pi * 620 * t) * math.exp(-t / 0.005) * 0.4
+        release = min(1.0, (dur - t) / 0.010)       # clean cut, no lingering tail
+        val = (body + click) * attack * release
+        val = math.tanh(val * (2.6 + 2.2 * volume))  # drive -> punch + harmonics
+        val *= (0.72 + 0.28 * volume)               # loud enough to notice
         frames += struct.pack("<h", int(max(-1.0, min(1.0, val)) * 32767))
     out = io.BytesIO()
     with wave.open(out, "wb") as w:
