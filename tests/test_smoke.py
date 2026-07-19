@@ -384,9 +384,21 @@ def test_flow_edit_mid_sentence_and_continuation():
     # more often a new sentence than a continuation).
     assert flow_edit("Also we should go.", mid_sentence=True,
                      continues_after=False) == "Also we should go."
+    # "So" is the same — a very common sentence opener, kept capitalized.
+    assert flow_edit("So it seems it works.", mid_sentence=True,
+                     continues_after=False) == "So it seems it works."
     # Not mid-sentence: untouched (normal standalone sentence).
     assert flow_edit("The rest follows.", mid_sentence=False,
                      continues_after=False) == "The rest follows."
+
+
+def test_reversed_sorry_no_is_a_correction_cue():
+    from app.cleanup import _CORRECTION_CUE_RE, too_divergent
+    # "sorry, no" (not just "no, sorry") is a self-correction, so the guard must
+    # waive its large deletion instead of rejecting the resolved output.
+    raw = "meeting by 3 pm sorry no by 2 pm"
+    assert _CORRECTION_CUE_RE.search(raw)
+    assert not too_divergent(raw, "meeting by 2 pm")
 
 
 def test_has_speech_gates_silence_and_noise_but_passes_speech():

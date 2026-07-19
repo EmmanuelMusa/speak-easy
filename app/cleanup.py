@@ -168,7 +168,8 @@ Output: For corporate bodies registering an engineering firm, the initial regist
 # deletes the corrected-away words) and tell live cleanup to merge a
 # correcting sentence with the sentence it corrects.
 _CORRECTION_CUE_RE = re.compile(
-    r"\b(?:no,?\s+sorry|scratch\s+that|wait,?\s+no|actually,?\s+no)\b",
+    r"\b(?:no,?\s+sorry|sorry,?\s+no|scratch\s+that|wait,?\s+no|"
+    r"actually,?\s+no)\b",
     re.IGNORECASE,
 )
 
@@ -451,7 +452,7 @@ def drop_noise(text: str) -> str:
 # word"), so a proper noun at the insertion point ("…and John") is never
 # lowercased either.
 _CONTINUE_LOWER = frozenset(
-    "the a an and but so to of in on for with that which this it its is was "
+    "the a an and but to of in on for with that which this it its is was "
     "we you they he she or as at by from our your their".split()
 )
 

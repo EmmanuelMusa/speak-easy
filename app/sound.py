@@ -26,23 +26,24 @@ _cache: dict[float, bytes] = {}
 
 
 def _render_cue(volume: float) -> bytes:
-    """A clean, standard 'ready' cue: two short rising notes (a perfect fifth,
-    G5 → D6), the classic 'on / start' signal. Each note has a smooth
-    raised-cosine (Hann) envelope so there are no edge clicks, and a soft second
-    harmonic for a fuller, less thin tone. Bright and clearly audible on small
-    speakers, but short and unobtrusive. 16-bit mono WAV bytes.
+    """A soft, warm 'ready' cue: two gentle rising notes (a mellow major third,
+    C5 → E5) in a comfortable mid range — not the bright, high fifth it used to
+    be. Pure sine tones (no bright harmonics) under a soft attack + gentle
+    bell-like decay, at a low level: pleasing and unobtrusive rather than sharp.
+    16-bit mono WAV bytes.
     """
-    note, gap = 0.055, 0.014            # seconds per note / silence between
-    notes = (784.0, 1174.7)             # G5 -> D6: a bright rising fifth
-    level = 0.32 + 0.5 * volume
+    note, gap = 0.10, 0.02              # seconds per note / silence between
+    notes = (523.25, 659.25)           # C5 -> E5: a warm, gentle rising third
+    level = 0.20 + 0.30 * volume       # soft
     frames = bytearray()
     for idx, f in enumerate(notes):
         n = int(_SAMPLE_RATE * note)
         for i in range(n):
             t = i / _SAMPLE_RATE
-            env = 0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1))  # Hann
-            tone = math.sin(2 * math.pi * f * t) + 0.28 * math.sin(2 * math.pi * 2 * f * t)
-            val = tone * env * level
+            attack = 1.0 - math.exp(-t / 0.007)        # gentle ~7 ms attack
+            decay = math.exp(-t / 0.090)               # soft bell-like decay
+            release = min(1.0, (note - t) / 0.015)     # fade tail to silence
+            val = math.sin(2 * math.pi * f * t) * attack * decay * release * level
             frames += struct.pack("<h", int(max(-1.0, min(1.0, val)) * 32767))
         if idx == 0:
             frames += b"\x00\x00" * int(_SAMPLE_RATE * gap)
