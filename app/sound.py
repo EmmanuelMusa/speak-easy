@@ -32,17 +32,23 @@ def _render_cue(volume: float) -> bytes:
     bell-like decay, at a low level: pleasing and unobtrusive rather than sharp.
     16-bit mono WAV bytes.
     """
-    note, gap = 0.10, 0.02              # seconds per note / silence between
+    note, gap = 0.12, 0.02              # seconds per note / silence between
     notes = (523.25, 659.25)           # C5 -> E5: a warm, gentle rising third
-    level = 0.15 + 0.22 * volume       # soft (gentle)
+    level = 0.13 + 0.19 * volume       # soft (gentle)
+    rel = 0.045                         # long, smooth tail
     frames = bytearray()
     for idx, f in enumerate(notes):
         n = int(_SAMPLE_RATE * note)
         for i in range(n):
             t = i / _SAMPLE_RATE
-            attack = 1.0 - math.exp(-t / 0.007)        # gentle ~7 ms attack
-            decay = math.exp(-t / 0.090)               # soft bell-like decay
-            release = min(1.0, (note - t) / 0.015)     # fade tail to silence
+            attack = 1.0 - math.exp(-t / 0.008)        # gentle ~8 ms attack
+            decay = math.exp(-t / 0.100)               # soft bell-like decay
+            # Raised-cosine release: eases to silence with zero slope at both
+            # ends, so the tone fades out cleanly instead of ending sharply.
+            if t > note - rel:
+                release = 0.5 * (1.0 + math.cos(math.pi * (t - (note - rel)) / rel))
+            else:
+                release = 1.0
             val = math.sin(2 * math.pi * f * t) * attack * decay * release * level
             frames += struct.pack("<h", int(max(-1.0, min(1.0, val)) * 32767))
         if idx == 0:
