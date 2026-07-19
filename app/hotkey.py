@@ -408,10 +408,11 @@ class PushToTalkApp:
 
     def _reload_stt(self, previous: dict | None = None) -> None:
         attempted = self.cfg.stt.engine
-        log.info("Loading STT engine '%s'...", attempted)
+        log.info("Loading and warming STT engine '%s'...", attempted)
         new = make_transcriber(self.cfg.stt)
         try:
-            new._load()
+            new.warmup()  # load AND run one inference, so the first dictation
+                          # after switching engines (e.g. A/B-ing) isn't slow
         except Exception as exc:
             log.error("STT engine failed to load (%s); keeping current", exc)
             # The new values were already persisted in _apply_settings, so a

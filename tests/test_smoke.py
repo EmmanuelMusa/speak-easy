@@ -486,7 +486,7 @@ def test_reload_stt_rolls_back_and_warns_on_failure(monkeypatch):
                 "parakeet_model": cfg.stt.parakeet_model}
 
     boom = MagicMock()
-    boom._load.side_effect = RuntimeError("no onnx-asr")
+    boom.warmup.side_effect = RuntimeError("no onnx-asr")  # load/warm fails
     monkeypatch.setattr(hk, "make_transcriber", lambda _c: boom)
     saved: dict = {}
     monkeypatch.setattr(hk, "save_config_updates", lambda d: saved.update(d))
