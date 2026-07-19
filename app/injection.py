@@ -137,12 +137,15 @@ def _looks_listy(text: str) -> bool:
 
 
 def _text_to_html(text: str) -> str:
-    """Render `text` as an HTML fragment: runs of numbered lines become an
-    <ol>, bulleted lines a <ul>, and everything else a <p>. So a rich editor
-    pastes a real list (with real numbering) rather than literal "1. " text."""
+    """Render `text` as an HTML fragment structured like the rich-list HTML that
+    editors treat as a NATIVE, auto-exiting list: runs of numbered/bulleted
+    lines become an <ol>/<ul> of bare <li> items, and lead-in / trailing lines
+    are bare text (NOT <p>-wrapped) — all inside a font-inheriting <div>. The
+    <p> wrapping we used before made editors treat the list as a separate block;
+    this shape (matched to a reference dictation app) pastes as one native flow."""
     import html as _html
     lines = text.split("\n")
-    out: list[str] = []
+    blocks: list[str] = []
     i = 0
     while i < len(lines):
         num, bul = _NUM_LINE.match(lines[i]), _BUL_LINE.match(lines[i])
@@ -150,15 +153,16 @@ def _text_to_html(text: str) -> str:
             pat, tag = (_NUM_LINE, "ol") if num else (_BUL_LINE, "ul")
             items = []
             while i < len(lines) and pat.match(lines[i]):
-                items.append(_html.escape(pat.match(lines[i]).group(1)))
+                items.append("<li>" + _html.escape(pat.match(lines[i]).group(1))
+                             + "</li>")
                 i += 1
-            out.append(f"<{tag}>" + "".join(f"<li>{it}</li>" for it in items)
-                       + f"</{tag}>")
+            blocks.append(f"<{tag}>\r\n\r\n" + "\r\n\r\n".join(items)
+                          + f"\r\n\r\n</{tag}>")
         else:
             if lines[i].strip():
-                out.append(f"<p>{_html.escape(lines[i].strip())}</p>")
+                blocks.append(_html.escape(lines[i].strip()))
             i += 1
-    return "".join(out)
+    return '<div style="font: inherit;">' + "\r\n\r\n".join(blocks) + "</div>"
 
 
 def _cf_html(fragment: str) -> bytes:

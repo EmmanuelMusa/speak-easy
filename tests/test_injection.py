@@ -14,9 +14,13 @@ def test_text_to_html_renders_native_list():
     from app.injection import _text_to_html, _looks_listy
     text = "My plan:\n\t1. Do this.\n\t2. Do that.\nThen rest."
     assert _looks_listy(text)
-    assert _text_to_html(text) == (
-        "<p>My plan:</p><ol><li>Do this.</li><li>Do that.</li></ol>"
-        "<p>Then rest.</p>")
+    html = _text_to_html(text)
+    # font-inheriting div wrapper, bare lead/trailing text (NOT <p>-wrapped),
+    # an <ol> of bare <li> items — the shape editors accept as a native list.
+    assert html.startswith('<div style="font: inherit;">') and html.endswith("</div>")
+    assert "<p>" not in html
+    assert "<ol>" in html and "<li>Do this.</li>" in html and "<li>Do that.</li>" in html
+    assert "My plan:" in html and "Then rest." in html
     # HTML in the item text is escaped, not injected.
     assert "<script>" not in _text_to_html("1. <script>x</script>")
     # Plain prose isn't listy.
