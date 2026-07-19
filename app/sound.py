@@ -34,7 +34,7 @@ def _render_cue(volume: float) -> bytes:
     """
     note, gap = 0.10, 0.02              # seconds per note / silence between
     notes = (523.25, 659.25)           # C5 -> E5: a warm, gentle rising third
-    level = 0.20 + 0.30 * volume       # soft
+    level = 0.15 + 0.22 * volume       # soft (gentle)
     frames = bytearray()
     for idx, f in enumerate(notes):
         n = int(_SAMPLE_RATE * note)
