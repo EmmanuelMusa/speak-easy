@@ -432,6 +432,20 @@ def test_cardinal_markers_become_a_numbered_list():
     )
 
 
+def test_enumeration_formats_even_with_surrounding_context():
+    # Regression: when the caret had surrounding text (mid-sentence), list
+    # reformatting was disabled, so a clear enumeration came out inline.
+    from app.config import CleanupConfig
+    from app.cleanup import Cleaner
+    from app.focus import Surrounding
+    c = Cleaner(CleanupConfig(enabled=False))       # fallback path, no Ollama
+    s = Surrounding(before="here is my plan for the day", after="")
+    out = c.clean("one, wake up, two, go to bed, three, sleep", surrounding=s)
+    assert out == "1. Wake up.\n2. Go to bed.\n3. Sleep."
+    # A plain mid-sentence insertion is NOT turned into a list.
+    assert "1." not in c.clean("and then we should head out", surrounding=s)
+
+
 def test_cardinal_reformat_ignores_prose_numbers():
     from app.cleanup import reformat_enumeration
     # Not a run starting at one at item boundaries -> left as prose.

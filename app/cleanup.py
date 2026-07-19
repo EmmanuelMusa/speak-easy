@@ -532,7 +532,13 @@ class Cleaner:
         local = strip_fillers(
             fb, capitalize=not mid_sentence, ensure_period=not continues_after
         )
-        reformat_ok = reformat and not (mid_sentence or continues_after)
+        # Reformat enumerations into a list even when the caret has surrounding
+        # text: a clear enumeration ("One... two... three...") is a list no
+        # matter the context, and the detection is strict enough (2+ ordinal
+        # cues, or a cardinal run starting at one) that ordinary mid-sentence
+        # prose is never turned into a list. Only live-cleanup chunks (reformat
+        # = False) opt out, since they lack the whole utterance.
+        reformat_ok = reformat
 
         def finish(text: str) -> str:
             return self._finish(text, reformat_ok, mid_sentence, continues_after)
