@@ -26,6 +26,12 @@ from .training import TrainingStore
 
 log = logging.getLogger(__name__)
 
+# How long the push-to-talk key must stay held before the start cue sounds. A
+# genuine hold clears this instantly; a brief accidental trigger is released
+# first and the cue is cancelled, so stray chords never beep. Short enough to
+# feel immediate on a real press.
+_CUE_DELAY_S = 0.13
+
 
 def _notify_user(msg: str) -> None:
     """Surface a problem the user must see even with no console. When launched
@@ -98,6 +104,7 @@ class PushToTalkApp:
         self._surrounding: focus.Surrounding | None = None
         self._press_gen = 0  # invalidates surrounding reads from older presses
         self._last_audio: tuple | None = None  # (audio, sr) held for correction capture
+        self._cue_timer: threading.Timer | None = None  # debounces the start cue
 
     # -- hotkey callbacks ------------------------------------------------
 
@@ -110,7 +117,18 @@ class PushToTalkApp:
             return  # key autorepeat: the hold is already in progress
         log.info("Recording... (release %s to dictate)", self.cfg.hotkey.binding)
         if self.cfg.audio.start_sound:
-            sound.play_start_cue(self.cfg.audio.start_sound_volume)
+            # Debounce the cue: play it a beat into the hold, and cancel it on an
+            # early release. The push-to-talk chord (e.g. Ctrl+Shift+Space) can
+            # be triggered momentarily by accident — a stuck modifier plus a
+            # tapped spacebar while typing, or another app's shortcut — and
+            # without this every such blip would beep. A real hold clears the
+            # threshold; an accidental tap never sounds.
+            vol = self.cfg.audio.start_sound_volume
+            self._cue_timer = threading.Timer(
+                _CUE_DELAY_S, lambda: sound.play_start_cue(vol)
+            )
+            self._cue_timer.daemon = True
+            self._cue_timer.start()
         self.recorder.start()
         # Capture the transcriber once: a live engine switch (_reload_stt runs
         # on a background thread) can swap self.transcriber at any moment, so
@@ -157,6 +175,11 @@ class PushToTalkApp:
         self.overlay.show_recording()
 
     def _on_release(self) -> None:
+        # Cancel a still-pending start cue: this press was too brief to be a real
+        # hold, so it should never have beeped.
+        if self._cue_timer is not None:
+            self._cue_timer.cancel()
+            self._cue_timer = None
         if not self.recorder.recording:
             return
         audio = self.recorder.stop()
