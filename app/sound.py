@@ -32,24 +32,25 @@ def _render_cue(volume: float) -> bytes:
     bell-like decay, at a low level: pleasing and unobtrusive rather than sharp.
     16-bit mono WAV bytes.
     """
-    note, gap = 0.12, 0.02              # seconds per note / silence between
+    note, gap = 0.15, 0.02              # seconds per note / silence between
     notes = (523.25, 659.25)           # C5 -> E5: a warm, gentle rising third
-    level = 0.13 + 0.19 * volume       # soft (gentle)
-    rel = 0.045                         # long, smooth tail
+    level = 0.09 + 0.13 * volume       # soft (gentle)
+    atk = 0.010                         # ~10 ms soft attack
     frames = bytearray()
     for idx, f in enumerate(notes):
         n = int(_SAMPLE_RATE * note)
         for i in range(n):
             t = i / _SAMPLE_RATE
-            attack = 1.0 - math.exp(-t / 0.008)        # gentle ~8 ms attack
-            decay = math.exp(-t / 0.100)               # soft bell-like decay
-            # Raised-cosine release: eases to silence with zero slope at both
-            # ends, so the tone fades out cleanly instead of ending sharply.
-            if t > note - rel:
-                release = 0.5 * (1.0 + math.cos(math.pi * (t - (note - rel)) / rel))
+            # One continuous cosine envelope: a smooth rise, then a single long
+            # cosine fall all the way to zero (no decay->release seam). Zero
+            # slope at the very end, so the tone dissolves into silence with no
+            # audible cutoff.
+            if t < atk:
+                env = 0.5 * (1.0 - math.cos(math.pi * t / atk))
             else:
-                release = 1.0
-            val = math.sin(2 * math.pi * f * t) * attack * decay * release * level
+                x = (t - atk) / (note - atk)               # 0 -> 1
+                env = 0.5 * (1.0 + math.cos(math.pi * x))  # 1 -> 0, smooth
+            val = math.sin(2 * math.pi * f * t) * env * level
             frames += struct.pack("<h", int(max(-1.0, min(1.0, val)) * 32767))
         if idx == 0:
             frames += b"\x00\x00" * int(_SAMPLE_RATE * gap)
