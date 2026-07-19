@@ -259,12 +259,11 @@ _CARDINALS = {w: i for i, w in enumerate(
     "one two three four five six seven eight nine ten".split(), 1)}
 
 # Inline digit markers the model sometimes emits instead of a real multi-line
-# list ("... try out. 1. eat ice cream. 2. take pancakes."). Same boundaries as
-# the cardinal markers; reformatted only when they form a run starting at 1.
-_DIGIT_ITEM_RE = re.compile(
-    r"(?:(?:^|(?<=[.!?])|(?<=,)|(?<=:))\s*|\b(?:(?:and|then|next)\s+)+)"
-    r"(\d{1,2})[.)]\s+",
-)
+# list — with OR without a trailing dot: "... try out. 1. eat. 2. sleep." or
+# "try out: 1 eat. 2 sleep.". Only at a start / sentence-end / colon boundary
+# (never after a comma) and only when they form a run from 1, so a count like
+# "1 apple, 2 oranges" is never mistaken for a list.
+_DIGIT_ITEM_RE = re.compile(r"(?:^|(?<=[.!?:]))\s*(\d{1,2})[.)]?\s+")
 
 # Spoken domains: "one dot com" -> "one.com". Limited to a known TLD so an
 # ordinary "dot" between words is left alone.

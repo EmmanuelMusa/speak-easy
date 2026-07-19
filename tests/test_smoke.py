@@ -460,9 +460,15 @@ def test_inline_digit_markers_become_a_multiline_list():
     raw = "My plan. 1. Eat. 2. Sleep. 3. Rest. Then I am done for the day."
     assert reformat_enumeration(raw) == (
         "My plan:\n1. Eat.\n2. Sleep.\n3. Rest.\nThen I am done for the day.")
+    # Bare digits (no dot after the number) at sentence boundaries also count.
+    assert reformat_enumeration("Things to try: 1 do this. 2 do that. 3 rest.") == \
+        "Things to try:\n1. Do this.\n2. Do that.\n3. Rest."
     # A lone "1." in prose is not a list.
     assert reformat_enumeration("I ranked 1. in the class.") == \
         "I ranked 1. in the class."
+    # A comma-separated count is not a list.
+    assert reformat_enumeration("I bought 1 apple, 2 pears, 3 plums.") == \
+        "I bought 1 apple, 2 pears, 3 plums."
 
 
 def test_trailing_sentence_split_off_last_list_item():
