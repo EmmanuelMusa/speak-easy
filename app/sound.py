@@ -26,34 +26,26 @@ _cache: dict[float, bytes] = {}
 
 
 def _render_cue(volume: float) -> bytes:
-    """A short, punchy notification 'thump' — a soft percussive knock, not a
-    fading tone. The trick to reading as a *thump* rather than "something dying
-    out" is a fast, percussive envelope: near-instant attack, a SHORT decay, and
-    a clean cut — so it lands as one discrete hit and is gone.
-
-    A quick pitch drop (≈200 → 120 Hz) gives the body; a tiny high click at the
-    onset gives the attack "presence" that small speakers reproduce; tanh drive
-    adds harmonics so the low body carries too. 16-bit mono WAV bytes.
+    """A clean, standard 'ready' cue: two short rising notes (a perfect fifth,
+    G5 → D6), the classic 'on / start' signal. Each note has a smooth
+    raised-cosine (Hann) envelope so there are no edge clicks, and a soft second
+    harmonic for a fuller, less thin tone. Bright and clearly audible on small
+    speakers, but short and unobtrusive. 16-bit mono WAV bytes.
     """
-    dur = 0.14
-    n = int(_SAMPLE_RATE * dur)
-    f_start, f_end = 170.0, 92.0                    # deeper than before
+    note, gap = 0.055, 0.014            # seconds per note / silence between
+    notes = (784.0, 1174.7)             # G5 -> D6: a bright rising fifth
+    level = 0.32 + 0.5 * volume
     frames = bytearray()
-    phase = 0.0
-    for i in range(n):
-        t = i / _SAMPLE_RATE
-        f = f_end + (f_start - f_end) * math.exp(-t / 0.020)
-        phase += 2 * math.pi * f / _SAMPLE_RATE
-        attack = min(1.0, t / 0.0015)               # ~1.5 ms attack
-        body = math.sin(phase) * math.exp(-t / 0.040)  # punchy, a touch more body
-        click = math.sin(2 * math.pi * 520 * t) * math.exp(-t / 0.005) * 0.35
-        release = min(1.0, (dur - t) / 0.012)       # clean cut, no lingering tail
-        val = (body + click) * attack * release
-        # Heavier drive: more harmonics of the deep fundamental -> the ear reads
-        # it as deep AND it's plainly louder on small speakers.
-        val = math.tanh(val * (4.0 + 2.0 * volume))
-        val *= 0.92 * release
-        frames += struct.pack("<h", int(max(-1.0, min(1.0, val)) * 32767))
+    for idx, f in enumerate(notes):
+        n = int(_SAMPLE_RATE * note)
+        for i in range(n):
+            t = i / _SAMPLE_RATE
+            env = 0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1))  # Hann
+            tone = math.sin(2 * math.pi * f * t) + 0.28 * math.sin(2 * math.pi * 2 * f * t)
+            val = tone * env * level
+            frames += struct.pack("<h", int(max(-1.0, min(1.0, val)) * 32767))
+        if idx == 0:
+            frames += b"\x00\x00" * int(_SAMPLE_RATE * gap)
     out = io.BytesIO()
     with wave.open(out, "wb") as w:
         w.setnchannels(1)

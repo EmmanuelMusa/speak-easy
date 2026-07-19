@@ -270,6 +270,15 @@ def _apply_spoken_dot(text: str) -> str:
     return _DOMAIN_DOT_RE.sub(lambda m: f"{m.group(1)}.{m.group(2)}", text)
 
 
+# The application's own name: whatever the STT heard — "speak easy", "speakeasy",
+# "speak-easy" — normalize to the one-word brand spelling wherever it's dictated.
+_APP_NAME_RE = re.compile(r"\bspeak[\s-]?easy\b", re.IGNORECASE)
+
+
+def _normalize_app_name(text: str) -> str:
+    return _APP_NAME_RE.sub("SpeakEasy", text)
+
+
 def _is_list(text: str) -> bool:
     """True if `text` contains a formatted list (numbered or bulleted)."""
     return bool(_LIST_ITEM_RE.search(text))
@@ -552,7 +561,8 @@ class Cleaner:
         (no-op for non-lists)."""
         text = drop_noise(text)
         text = collapse_ellipses(text)
-        text = _apply_spoken_dot(text)   # "one dot com" -> "one.com"
+        text = _apply_spoken_dot(text)      # "one dot com" -> "one.com"
+        text = _normalize_app_name(text)    # "speak easy" -> "SpeakEasy"
         # Guarantee sentence-start capitalization the model may have missed —
         # but not the first letter when we're continuing a sentence at the caret
         # (flow_edit handles that lowercase continuation next).
@@ -617,7 +627,17 @@ class Cleaner:
                 "prompt": prompt,
                 "stream": False,
                 "keep_alive": KEEP_ALIVE,
-                "options": {"temperature": 0},
+                "options": {
+                    "temperature": 0,
+                    # Fit the whole prompt (system ~1.6k + few-shot + surrounding
+                    # + transcript). Below this, Ollama's default context would
+                    # silently drop the START of the system prompt — the rules —
+                    # on a longer dictation, quietly degrading the cleanup.
+                    "num_ctx": 4096,
+                    # Bound a pathological runaway (ample for any push-to-talk
+                    # utterance) so it can't burn the whole timeout.
+                    "num_predict": 1024,
+                },
             },
             timeout=timeout,
         )

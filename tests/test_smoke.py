@@ -437,6 +437,16 @@ def test_spoken_dot_only_touches_domains():
         "connect the dot to the line"
 
 
+def test_app_name_normalized_to_speakeasy():
+    from app.cleanup import _normalize_app_name
+    assert _normalize_app_name("open speak easy now") == "open SpeakEasy now"
+    assert _normalize_app_name("I use Speakeasy daily") == "I use SpeakEasy daily"
+    assert _normalize_app_name("the speak-easy app") == "the SpeakEasy app"
+    # Not a false-positive magnet: unrelated words untouched.
+    assert _normalize_app_name("speak clearly and take it easy") == \
+        "speak clearly and take it easy"
+
+
 def test_stt_engine_defaults():
     from app.config import SttConfig
     assert SttConfig().engine == "whisper"
