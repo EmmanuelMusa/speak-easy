@@ -145,6 +145,19 @@ QPushButton#link {
 }
 QPushButton#link:hover { color: #90adff; }
 QFrame#sep { background: #26262c; max-height: 1px; border: none; }
+QFrame#card {
+    background: #1c1c21; border: 1px solid #2a2a31; border-radius: 13px;
+}
+QLabel[role="card"] {
+    color: #7f8695; font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+}
+QLabel#brand { color: #ffffff; font-size: 17px; font-weight: 700; }
+QLabel#brandsub { color: #83838c; font-size: 11px; }
+QPushButton#change {
+    background: #26262d; color: #cdd8ff; border: 1px solid #3a3a44;
+    border-radius: 8px; padding: 6px 12px; font-size: 11px; font-weight: 600;
+}
+QPushButton#change:hover { background: #2f3040; border: 1px solid #6e96ff; }
 """
 
 
@@ -662,20 +675,161 @@ def main() -> int:
 
     # ------------------------------------------------------------- settings
 
+    def _qt_key_name(key):
+        """Map a Qt key code to the global-hotkeys name used in a binding
+        string. Returns None for keys we don't bind (the caller ignores them).
+        Anything odd that slips through is caught by the apply-time validator."""
+        Q = QtCore.Qt
+        mods = {Q.Key_Control: "control", Q.Key_Shift: "shift",
+                Q.Key_Alt: "alt", Q.Key_Meta: "window"}
+        if key in mods:
+            return mods[key]
+        if Q.Key_F1 <= key <= Q.Key_F24:
+            return "f%d" % (key - Q.Key_F1 + 1)
+        if Q.Key_A <= key <= Q.Key_Z:
+            return chr(key).lower()
+        if Q.Key_0 <= key <= Q.Key_9:
+            return chr(key)
+        return {Q.Key_Space: "space", Q.Key_Tab: "tab",
+                Q.Key_CapsLock: "caps_lock", Q.Key_Insert: "insert",
+                Q.Key_Home: "home", Q.Key_End: "end",
+                Q.Key_PageUp: "page_up", Q.Key_PageDown: "page_down"}.get(key)
+
+    class BrandMark(QtWidgets.QWidget):
+        """Small circular app mark — a mic in a blue-tinted disc — echoing the
+        mic button on the pill so the settings window reads as the same app."""
+
+        def __init__(self, d: int = 40):
+            super().__init__()
+            self._d = d
+            self.setFixedSize(d, d)
+
+        def paintEvent(self, _e):
+            p = QtGui.QPainter(self)
+            p.setRenderHint(QtGui.QPainter.Antialiasing)
+            r = QtCore.QRectF(0.5, 0.5, self._d - 1, self._d - 1)
+            p.setPen(QtGui.QPen(QtGui.QColor(0x3a, 0x46, 0x74), 1.0))
+            p.setBrush(QtGui.QColor(0x22, 0x28, 0x3f))
+            p.drawEllipse(r)
+            _draw_mic(p, self._d / 2, self._d / 2, self._d * 0.46,
+                      QtGui.QColor(0x9d, 0xb4, 0xff))
+            p.end()
+
+    class ShortcutField(QtWidgets.QWidget):
+        """The push-to-talk binding, shown as keycaps. Click to capture a new
+        chord: hold your modifiers and press the final key; Esc cancels. Exposes
+        text()/setText() so it drops into the existing load/save path."""
+
+        def __init__(self):
+            super().__init__()
+            self._binding = "f9"
+            self._capturing = False
+            self._mods = set()
+            self.setMinimumHeight(48)
+            self.setCursor(QtCore.Qt.PointingHandCursor)
+            self.setFocusPolicy(QtCore.Qt.StrongFocus)
+            self.setToolTip("Click, then press your push-to-talk keys")
+
+        # compat with the QLineEdit the dialog used to hold here
+        def text(self):
+            return self._binding
+
+        def setText(self, b):
+            self._binding = (b or "f9").strip() or "f9"
+            self.update()
+
+        def selectAll(self):
+            self.start_capture()
+
+        def start_capture(self):
+            self._capturing = True
+            self._mods = set()
+            self.grabKeyboard()
+            self.setFocus()
+            self.update()
+
+        def _stop_capture(self):
+            self._capturing = False
+            self.releaseKeyboard()
+            self.update()
+
+        def mousePressEvent(self, _e):
+            self.start_capture() if not self._capturing else self._stop_capture()
+
+        def keyPressEvent(self, e):
+            if not self._capturing:
+                return super().keyPressEvent(e)
+            if e.key() == QtCore.Qt.Key_Escape:
+                self._stop_capture()
+                return
+            name = _qt_key_name(e.key())
+            if name in ("control", "shift", "alt", "window"):
+                self._mods.add(name)
+                self.update()
+                return
+            if name:
+                order = ("control", "shift", "alt", "window")
+                mods = [m for m in order if m in self._mods]
+                self._binding = " + ".join(mods + [name])
+                self._stop_capture()
+
+        def focusOutEvent(self, e):
+            if self._capturing:
+                self._stop_capture()
+            super().focusOutEvent(e)
+
+        def paintEvent(self, _e):
+            p = QtGui.QPainter(self)
+            p.setRenderHint(QtGui.QPainter.Antialiasing)
+            p.setRenderHint(QtGui.QPainter.TextAntialiasing)
+            rect = QtCore.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+            focused = self._capturing
+            p.setPen(QtGui.QPen(QtGui.QColor(0x6e, 0x96, 0xff) if focused
+                                else QtGui.QColor(0x33, 0x33, 0x3a), 1.0))
+            p.setBrush(QtGui.QColor(0x23, 0x23, 0x27))
+            p.drawRoundedRect(rect, 9, 9)
+            cy = rect.center().y()
+            cap_font = p.font()
+            cap_font.setPointSizeF(9.0)
+            cap_font.setBold(True)
+            if self._capturing:
+                keys = [k.title() for k in
+                        sorted(self._mods, key="control shift alt window".split().index)]
+                if keys:
+                    x = rect.left() + 12
+                    for k in keys:
+                        x = _draw_keycap(p, x, cy, k, cap_font) + 6
+                    p.setPen(QtGui.QColor(0x83, 0x83, 0x8c))
+                    lbl = p.font(); lbl.setPointSizeF(9.5); p.setFont(lbl)
+                    p.drawText(QtCore.QRectF(x, cy - 9, rect.right() - x - 8, 18),
+                               QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft,
+                               "…press a key")
+                else:
+                    p.setPen(QtGui.QColor(0x9a, 0x9a, 0xa2))
+                    lbl = p.font(); lbl.setPointSizeF(10.0); p.setFont(lbl)
+                    p.drawText(rect, QtCore.Qt.AlignCenter,
+                               "Press your push-to-talk keys…")
+            else:
+                keys = _shortcut_keys(self._binding)
+                x = rect.left() + 12
+                for k in keys:
+                    x = _draw_keycap(p, x, cy, k, cap_font) + 6
+            p.end()
+
     class SettingsDialog(QtWidgets.QWidget):
         def __init__(self, values: dict):
             super().__init__(None, QtCore.Qt.WindowStaysOnTopHint)
             self.setWindowTitle("Speak Easy Settings")
             self.setObjectName("root")
             self.setStyleSheet(DIALOG_QSS)
-            self.setFixedWidth(360)
+            self.setFixedWidth(384)
             self._review_dialog = None
 
             self.training = QtWidgets.QCheckBox("Ask for feedback after dictations")
             self.replace = QtWidgets.QCheckBox(
                 "Fix the typed text in place on correction"
             )
-            self.hotkey = QtWidgets.QLineEdit()
+            self.hotkey = ShortcutField()
             self.engine = QtWidgets.QComboBox()
             self.engine.addItems(STT_ENGINES)
             self.engine.setToolTip(
@@ -695,70 +849,80 @@ def main() -> int:
             self.delivery.addItems(DELIVERY)
 
             root = QtWidgets.QVBoxLayout(self)
-            root.setContentsMargins(22, 20, 22, 18)
-            root.setSpacing(4)
+            root.setContentsMargins(20, 18, 20, 16)
+            root.setSpacing(11)
 
-            title = QtWidgets.QLabel("Speak Easy")
-            title.setObjectName("title")
-            subtitle = QtWidgets.QLabel("Dictation settings")
-            subtitle.setObjectName("subtitle")
-            root.addWidget(title)
-            root.addWidget(subtitle)
-            root.addSpacing(14)
+            # Header: brand mark + name.
+            header = QtWidgets.QHBoxLayout()
+            header.setSpacing(12)
+            header.addWidget(BrandMark())
+            brand = QtWidgets.QVBoxLayout()
+            brand.setSpacing(1)
+            name = QtWidgets.QLabel("Speak Easy")
+            name.setObjectName("brand")
+            sub = QtWidgets.QLabel("Dictation settings")
+            sub.setObjectName("brandsub")
+            brand.addWidget(name)
+            brand.addWidget(sub)
+            header.addLayout(brand)
+            header.addStretch(1)
+            root.addLayout(header)
+            root.addSpacing(2)
 
-            def section(text: str) -> None:
-                lbl = QtWidgets.QLabel(text)
-                lbl.setProperty("role", "section")
-                root.addWidget(lbl)
+            def card(title: str) -> QtWidgets.QVBoxLayout:
+                fr = QtWidgets.QFrame()
+                fr.setObjectName("card")
+                lay = QtWidgets.QVBoxLayout(fr)
+                lay.setContentsMargins(15, 12, 15, 14)
+                lay.setSpacing(9)
+                t = QtWidgets.QLabel(title)
+                t.setProperty("role", "card")
+                lay.addWidget(t)
+                root.addWidget(fr)
+                return lay
 
-            def field(label: str, widget):
+            def field(lay, label: str, widget):
                 """A label+widget row in its own container, so it can be shown
                 or hidden as a unit (space collapses cleanly when hidden)."""
                 c = QtWidgets.QWidget()
-                lay = QtWidgets.QVBoxLayout(c)
-                lay.setContentsMargins(0, 0, 0, 8)
-                lay.setSpacing(4)
+                inner = QtWidgets.QVBoxLayout(c)
+                inner.setContentsMargins(0, 0, 0, 0)
+                inner.setSpacing(5)
                 lbl = QtWidgets.QLabel(label)
                 lbl.setProperty("role", "field")
-                lay.addWidget(lbl)
-                lay.addWidget(widget)
-                root.addWidget(c)
+                inner.addWidget(lbl)
+                inner.addWidget(widget)
+                lay.addWidget(c)
                 return c
 
-            section("DICTATION")
-            root.addSpacing(6)
-            field("Push-to-talk key", self.hotkey)
-            field("STT engine", self.engine)
-            # Engine-specific model choice: only the active engine's field shows
-            # (an engine with no options shows nothing here).
-            self._whisper_field = field("Speech model", self.stt_model)
-            self._parakeet_field = field("Parakeet model", self.parakeet_model)
+            ptt = card("PUSH-TO-TALK")
+            ptt.addWidget(self.hotkey)
+            ptt_hint = QtWidgets.QLabel("Hold to dictate · click the keys to rebind")
+            ptt_hint.setProperty("role", "field")
+            ptt.addWidget(ptt_hint)
+
+            speech = card("SPEECH")
+            field(speech, "Engine", self.engine)
+            # Engine-specific model choice: only the active engine's field shows.
+            self._whisper_field = field(speech, "Whisper model", self.stt_model)
+            self._parakeet_field = field(speech, "Parakeet model", self.parakeet_model)
             self.engine.currentTextChanged.connect(self._sync_engine_fields)
-            field("Cleanup model", self.ollama_model)
-            root.addWidget(self.cleanup)
-            root.addSpacing(12)
 
-            sep = QtWidgets.QFrame()
-            sep.setObjectName("sep")
-            sep.setFixedHeight(1)
-            root.addWidget(sep)
-            root.addSpacing(12)
+            clean = card("CLEANUP")
+            clean.addWidget(self.cleanup)
+            field(clean, "Cleanup model", self.ollama_model)
 
-            section("BEHAVIOR")
-            root.addSpacing(6)
-            root.addWidget(self.training)
-            root.addSpacing(4)
-            root.addWidget(self.replace)
-            root.addSpacing(10)
-            field("Text delivery", self.delivery)
-
+            behave = card("BEHAVIOR")
+            behave.addWidget(self.training)
+            behave.addWidget(self.replace)
+            field(behave, "Text delivery", self.delivery)
             self.review_btn = QtWidgets.QPushButton("Review what it has learned…")
             self.review_btn.setObjectName("link")
             self.review_btn.setCursor(QtCore.Qt.PointingHandCursor)
             self.review_btn.clicked.connect(self._open_review)
-            root.addWidget(self.review_btn)
-            root.addSpacing(16)
+            behave.addWidget(self.review_btn)
 
+            root.addSpacing(4)
             buttons = QtWidgets.QHBoxLayout()
             buttons.setSpacing(8)
             quit_btn = QtWidgets.QPushButton("Quit")
