@@ -72,6 +72,16 @@ gave take takes took use uses used find finds found handle handles handled
 manage managed update updates updated improve improves improved change changed
 relevant important expertise punctuation comma commas period sentence word words
 good bad big small new old high low long short right wrong true false
+given amen caveat poll polls polling route routes routing concept concepts
+turbo batch batches post posts insert inserts inserting inserted rework
+reworks reworked reworking anything everything something nothing everyone
+someone anyone nobody create creates created creating build builds built
+building write writes wrote written read reads reading send sends sent
+ensure ensures ensured add adds added remove removes removed fix fixes fixed
+set sets setting run runs ran running start starts started stop stops stopped
+open opens opened close closes closed move moves moved keep keeps kept
+show shows showed put puts turn turns turned play plays played work works
+worked call calls called try tries tried help helps helped talk talks talked
 """.split())
 
 # Corrections below this TF-IDF cosine similarity to the current utterance are
@@ -303,16 +313,63 @@ class TrainingStore:
             [t for t in self.learned_vocab() if t.lower() != term.lower()]
         )
 
+    def prune_vocab(self) -> list[str]:
+        """Re-apply the current worth-preserving gate to the stored vocabulary,
+        dropping terms that no longer qualify (grammar/word-form junk learned
+        under looser rules) and case-insensitive duplicates. Returns the removed
+        terms. Rewrites the file only if something changed."""
+        vocab = self.learned_vocab()
+        kept: list[str] = []
+        seen: set[str] = set()
+        removed: list[str] = []
+        for term in vocab:
+            key = term.lower()
+            if key in seen:
+                removed.append(term)
+                continue
+            if self._worth_preserving(term):
+                kept.append(term)
+                seen.add(key)
+            else:
+                removed.append(term)
+        if removed:
+            self._write_vocab(kept)
+            log.info("Pruned %d junk/duplicate vocab terms: %s",
+                     len(removed), removed)
+        return removed
+
     @staticmethod
-    def _is_distinctive(term: str) -> bool:
+    def _preserve_shape(token: str) -> bool:
+        """True if `token`'s SPELLING is one a general model would plausibly get
+        wrong and so is worth preserving verbatim: an acronym (WEMA, PLLC,
+        CUDA), a camel/Pascal-cased identifier (WebSockets, iPhone), or a token
+        containing a digit (S3, H2O). A plain capitalized first letter is NOT a
+        signal here — that's handled separately as a proper-noun check."""
+        core = token.strip("'\".,")
+        if len(core) < 2:
+            return False
+        if any(c.isdigit() for c in core):
+            return True
+        letters = [c for c in core if c.isalpha()]
+        if len(letters) >= 2 and all(c.isupper() for c in letters):
+            return True                      # all-caps acronym
+        return any(c.isupper() for c in core[1:])  # internal caps
+
+    @staticmethod
+    def _worth_preserving(term: str) -> bool:
         """True if `term` carries a name / acronym / jargon token worth
-        preserving — a token of length >= 3 that is not ordinary English.
-        "Ogiop"/"WebSockets"/"Boba tea" qualify; "Whatever" and
-        "with the commas" are all common words, so they do not."""
-        return any(
-            len(t) >= 3 and t.lower() not in _COMMON_WORDS
-            for t in term.split()
-        )
+        preserving forever. A token qualifies if it has a distinctive spelling
+        shape (acronym/camelCase/digits) OR is a proper noun — capitalized and
+        not ordinary English. Purely lowercase words ("inserting", "concept",
+        "route") and capitalized common words ("Given", "Amen", "Polling") are
+        rejected: those are grammar/word-form edits, not terms to preserve."""
+        for raw in term.split():
+            t = raw.strip("'\".,")
+            if TrainingStore._preserve_shape(t):
+                return True
+            if len(t) >= 3 and t[0].isupper() and t.lower() not in _COMMON_WORDS:
+                return True
+        return False
 
     @staticmethod
     def _mine_vocab(output: str, ideal: str) -> list[str]:
@@ -337,7 +394,7 @@ class TrainingStore:
             term = " ".join(ideal_words[j1:j2])
             if len(term) < 3 or not any(c.isalpha() for c in term):
                 continue
-            if not TrainingStore._is_distinctive(term):
+            if not TrainingStore._worth_preserving(term):
                 continue
             was = " ".join(out_words[i1:i2])
             similarity = difflib.SequenceMatcher(

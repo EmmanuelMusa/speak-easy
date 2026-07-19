@@ -117,6 +117,44 @@ def test_vocab_mining_learns_phonetic_mishear_with_caps(tmp_path):
     assert "WebSockets" in store.learned_vocab()
 
 
+def test_vocab_mining_ignores_word_form_variants(tmp_path):
+    store = make_store(tmp_path)
+    # A tense/-ing edit is orthographically similar but is an ordinary word,
+    # not a term to preserve. (Regression: these polluted the vocab.)
+    store.record("we are inserted here", "We are inserted here.",
+                 "bad", "We are inserting here.")
+    assert store.learned_vocab() == []
+
+
+def test_vocab_mining_ignores_capitalized_common_word(tmp_path):
+    store = make_store(tmp_path)
+    # An ordinary word the model merely capitalized is not a name/jargon term.
+    store.record("we do poling now", "We do poling now.",
+                 "bad", "We do Polling now.")
+    assert store.learned_vocab() == []
+
+
+def test_vocab_mining_learns_acronym(tmp_path):
+    store = make_store(tmp_path)
+    # A misheard acronym (spelling + caps) is worth preserving.
+    store.record("send it to wima bank", "Send it to wima bank.",
+                 "bad", "Send it to WEMA bank.")
+    assert "WEMA" in store.learned_vocab()
+
+
+def test_prune_vocab_drops_junk_and_dupes_keeps_terms(tmp_path):
+    store = make_store(tmp_path)
+    store._write_vocab(["WebSockets", "inserting", "CUDA", "concept",
+                        "Blusalt", "Given this", "cuda"])
+    removed = store.prune_vocab()
+    kept = store.learned_vocab()
+    assert "WebSockets" in kept and "CUDA" in kept and "Blusalt" in kept
+    assert "inserting" not in kept and "concept" not in kept
+    assert "Given this" not in kept       # capitalized common words
+    assert "cuda" not in kept             # case-insensitive duplicate of CUDA
+    assert set(removed) == {"inserting", "concept", "Given this", "cuda"}
+
+
 def test_learned_vocab_merged_into_prompt(tmp_path):
     store = make_store(tmp_path)
     store._add_vocab(["Ogiop"])
