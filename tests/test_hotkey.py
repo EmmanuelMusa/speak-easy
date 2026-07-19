@@ -70,6 +70,7 @@ def test_start_cue_is_debounced(monkeypatch):
     # a genuine hold must. Regression: an accidental Ctrl+Shift+Space blip was
     # playing the start cue "on its own".
     import time
+    import types
     from unittest.mock import MagicMock
     import app.hotkey as hk
     from app.config import Config
@@ -88,6 +89,13 @@ def test_start_cue_is_debounced(monkeypatch):
     fake._busy.locked.return_value = False
     fake.recorder.recording = False
     fake._cue_timer = None
+    # recorder.start()/stop() drive the recording flag the cue guard checks.
+    def _start(): fake.recorder.recording = True
+    def _stop(): fake.recorder.recording = False
+    fake.recorder.start.side_effect = _start
+    fake.recorder.stop.side_effect = _stop
+    # Use the real (guarded) cue method the debounce timer targets.
+    fake._play_start_cue = types.MethodType(hk.PushToTalkApp._play_start_cue, fake)
 
     # Quick tap: press then release before the delay -> cue cancelled.
     hk.PushToTalkApp._on_press(fake)
@@ -95,8 +103,25 @@ def test_start_cue_is_debounced(monkeypatch):
     time.sleep(0.12)
     assert played == []
 
-    # Genuine hold: press and wait past the delay -> cue plays once.
+    # Genuine hold: press and stay recording past the delay -> cue plays once.
     fake._cue_timer = None
     hk.PushToTalkApp._on_press(fake)
     time.sleep(0.12)
     assert len(played) == 1
+
+
+def test_start_cue_skipped_if_recording_already_ended(monkeypatch):
+    # Robustness: if the hold ended (recording False) by the time the debounced
+    # cue fires, it must not beep — guards a raced/spurious press.
+    import types
+    from unittest.mock import MagicMock
+    import app.hotkey as hk
+    from app.config import Config
+
+    played = []
+    monkeypatch.setattr(hk.sound, "play_start_cue", lambda *a: played.append(a))
+    fake = MagicMock()
+    fake.cfg = Config()
+    fake.recorder.recording = False   # no longer recording
+    hk.PushToTalkApp._play_start_cue(fake)
+    assert played == []

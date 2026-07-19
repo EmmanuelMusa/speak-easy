@@ -380,6 +380,10 @@ def test_flow_edit_mid_sentence_and_continuation():
     # A proper noun at the insertion point is NEVER lowercased.
     assert flow_edit("John said yes.", mid_sentence=True,
                      continues_after=False) == "John said yes."
+    # A sentence-starter adverb keeps its capital even mid-caret ("Also…" is far
+    # more often a new sentence than a continuation).
+    assert flow_edit("Also we should go.", mid_sentence=True,
+                     continues_after=False) == "Also we should go."
     # Not mid-sentence: untouched (normal standalone sentence).
     assert flow_edit("The rest follows.", mid_sentence=False,
                      continues_after=False) == "The rest follows."

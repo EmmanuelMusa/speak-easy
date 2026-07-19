@@ -26,22 +26,31 @@ _cache: dict[float, bytes] = {}
 
 
 def _render_cue(volume: float) -> bytes:
-    """A soft, clearly-audible 'ready' blip: two short rising notes (E5 → B5),
-    each under a raised-cosine (Hann) envelope so there are no edge clicks.
-    Pitched high enough to carry over small laptop speakers (the old ~196 Hz
-    tone was near-inaudible on them). 16-bit mono WAV bytes."""
-    note, gap = 0.07, 0.012      # seconds per note / silent gap between
-    notes = (659.25, 987.77)     # E5 -> B5: bright and pleasant
+    """A deep, punchy 'thump' — a kick-drum-like cue rather than a chime, so it
+    reads as bass and doesn't blend in with Windows' high notification sounds.
+
+    A pure low tone is inaudible on laptop speakers, so we build the thump from
+    a fast downward pitch sweep (≈150 Hz → 55 Hz) with a quick attack and
+    exponential decay, then soft-saturate it (tanh). The saturation adds
+    harmonics of the low fundamental that small speakers CAN reproduce, so the
+    ear still perceives the deep pitch (missing-fundamental effect). 16-bit mono.
+    """
+    dur = 0.20
+    n = int(_SAMPLE_RATE * dur)
+    f_start, f_end = 150.0, 55.0     # pitch drops fast for the "punch"
     frames = bytearray()
-    for idx, f in enumerate(notes):
-        n = int(_SAMPLE_RATE * note)
-        for i in range(n):
-            t = i / _SAMPLE_RATE
-            env = 0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1))
-            val = math.sin(2 * math.pi * f * t) * env * volume
-            frames += struct.pack("<h", int(max(-1.0, min(1.0, val)) * 32767))
-        if idx == 0:
-            frames += b"\x00\x00" * int(_SAMPLE_RATE * gap)
+    phase = 0.0
+    for i in range(n):
+        t = i / _SAMPLE_RATE
+        f = f_end + (f_start - f_end) * math.exp(-t / 0.030)
+        phase += 2 * math.pi * f / _SAMPLE_RATE
+        attack = min(1.0, t / 0.004)         # ~4 ms soft attack (no hard click)
+        decay = math.exp(-t / 0.070)         # body of the thump
+        release = min(1.0, (dur - t) / 0.012)  # fade the tail to zero (no click)
+        val = math.sin(phase) * attack * decay
+        val = math.tanh(val * (1.6 + 2.4 * volume))  # drive -> audible harmonics
+        val *= (0.5 + 0.5 * volume) * release  # level tracks setting; clean tail
+        frames += struct.pack("<h", int(max(-1.0, min(1.0, val)) * 32767))
     out = io.BytesIO()
     with wave.open(out, "wb") as w:
         w.setnchannels(1)

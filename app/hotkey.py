@@ -123,10 +123,7 @@ class PushToTalkApp:
             # tapped spacebar while typing, or another app's shortcut — and
             # without this every such blip would beep. A real hold clears the
             # threshold; an accidental tap never sounds.
-            vol = self.cfg.audio.start_sound_volume
-            self._cue_timer = threading.Timer(
-                _CUE_DELAY_S, lambda: sound.play_start_cue(vol)
-            )
+            self._cue_timer = threading.Timer(_CUE_DELAY_S, self._play_start_cue)
             self._cue_timer.daemon = True
             self._cue_timer.start()
         self.recorder.start()
@@ -173,6 +170,17 @@ class PushToTalkApp:
 
             threading.Thread(target=_read_surrounding, daemon=True).start()
         self.overlay.show_recording()
+
+    def _play_start_cue(self) -> None:
+        """Fires ~130 ms into a hold. Only sounds if we're genuinely still
+        recording — a spurious or raced press that already ended must not beep.
+        The log line makes an unexpected cue traceable: if you hear the sound
+        with no 'Start cue' here (and no 'Recording...' just above it), what you
+        heard was not Speak Easy's cue."""
+        if not self.recorder.recording:
+            return
+        log.info("Start cue")
+        sound.play_start_cue(self.cfg.audio.start_sound_volume)
 
     def _on_release(self) -> None:
         # Cancel a still-pending start cue: this press was too brief to be a real

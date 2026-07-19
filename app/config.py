@@ -142,9 +142,9 @@ class PerformanceConfig:
     # so neither unloads and the first dictation after a long pause stays fast.
     # Off by default: it holds VRAM and uses a little power while you're idle.
     keep_warm: bool = False
-    # Seconds between keep-warm pings. Must be under Ollama's keep_alive (30m)
-    # to stop it unloading; a few minutes is plenty.
-    keep_warm_interval_seconds: float = 240.0
+    # Seconds between keep-warm pings. Sits just under Ollama's 30-minute
+    # keep_alive so the model never unloads, without over-pinging the GPU.
+    keep_warm_interval_seconds: float = 1500.0  # 25 minutes
 
 
 @dataclass

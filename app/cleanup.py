@@ -391,14 +391,16 @@ def drop_noise(text: str) -> str:
     return out
 
 
-# Common sentence-continuation words that are never proper nouns — safe to
-# lowercase when a dictation is inserted mid-sentence. A curated set (not "any
-# capitalized word") so a proper noun at the insertion point ("...and John")
-# is never wrongly lowercased.
+# Plain function words that are safe to lowercase when a dictation is inserted
+# mid-sentence. Deliberately EXCLUDES words that just as often begin a new
+# sentence in dictation — "also", "then", "just", "however", "because", "while",
+# "if", "when", "there", "here", wh-words — so a genuine new sentence ("Also,
+# we should…") isn't wrongly lowercased. A curated set (not "any capitalized
+# word"), so a proper noun at the insertion point ("…and John") is never
+# lowercased either.
 _CONTINUE_LOWER = frozenset(
     "the a an and but so to of in on for with that which this it its is was "
-    "we you they he she if when then also just or as at by from our your their "
-    "there here what where how why because while after before once".split()
+    "we you they he she or as at by from our your their".split()
 )
 
 
