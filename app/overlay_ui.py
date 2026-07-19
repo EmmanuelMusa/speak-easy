@@ -398,18 +398,16 @@ def main() -> int:
                 self.feedback_panel = FeedbackPanel(self, req)
                 self.feedback_panel.show()
             elif cmd == "selftest":
-                # Instantiate the dialogs + feedback panel so their render paths
-                # are exercised by automated tests (they can't click).
+                # Build every dialog AND drive the real interaction paths — key
+                # capture, engine sync, the pill's circular buttons — so an
+                # automated test exercises them, not just the render paths.
                 try:
-                    SettingsDialog(self.settings)
-                    ReviewDialog().refresh()
-                    fp = FeedbackPanel(self, {"id": 0, "raw": "hello wrld",
-                                              "cleaned": "Hello world."})
-                    fp._expand()
-                    fp.close()
+                    self._run_selftest()
                     emit({"type": "selftest_ok"})
                 except Exception as exc:  # pragma: no cover - reported to parent
-                    emit({"type": "selftest_err", "error": repr(exc)})
+                    import traceback
+                    emit({"type": "selftest_err",
+                          "error": f"{exc!r}\n{traceback.format_exc()}"})
             elif cmd == "pin":  # debug/visual-QA: pin the chip reveal (0..1)
                 self._pin = None if arg == "none" else float(arg)
             elif cmd == "pinhint":  # debug/visual-QA: force a tag ("gear"/"mic")
@@ -437,6 +435,75 @@ def main() -> int:
                 d.grab().save(arg)
                 d.deleteLater()
                 emit({"type": "shot_ok"})
+
+        def _run_selftest(self):
+            """Drive the interactive UI paths a test can't click: shortcut
+            capture, engine-field sync, and the pill's circular buttons. Raises
+            AssertionError on the first failure (reported to the parent)."""
+            def check(cond, msg):
+                if not cond:
+                    raise AssertionError(msg)
+
+            def press(widget, key):
+                widget.keyPressEvent(QtGui.QKeyEvent(
+                    QtCore.QEvent.KeyPress, key, QtCore.Qt.NoModifier))
+
+            class _Click:
+                def __init__(self, pos):
+                    self._pos = pos
+
+                def position(self):
+                    return self._pos
+
+            # Render paths for every dialog + the feedback panel.
+            dlg = SettingsDialog(self.settings)
+            ReviewDialog().refresh()
+            fp = FeedbackPanel(self, {"id": 0, "raw": "hello wrld",
+                                      "cleaned": "Hello world."})
+            fp._expand()
+            fp.close()
+
+            # Shortcut capture formats the binding; Esc cancels it.
+            sf = dlg.hotkey
+            sf.setText("f9")
+            sf.start_capture()
+            check(sf._capturing, "capture did not start")
+            for k in (QtCore.Qt.Key_Control, QtCore.Qt.Key_Shift,
+                      QtCore.Qt.Key_Space):
+                press(sf, k)
+            check(not sf._capturing, "capture did not end on the final key")
+            check(sf.text() == "control + shift + space",
+                  f"unexpected binding {sf.text()!r}")
+            sf.start_capture()
+            press(sf, QtCore.Qt.Key_Escape)
+            check(not sf._capturing and sf.text() == "control + shift + space",
+                  "Escape did not cancel the capture cleanly")
+
+            # Engine sync shows exactly one model field.
+            dlg.engine.setCurrentText("whisper")
+            check(dlg._whisper_field.isVisibleTo(dlg)
+                  and not dlg._parakeet_field.isVisibleTo(dlg),
+                  "whisper engine did not show only the whisper model field")
+            dlg.engine.setCurrentText("parakeet")
+            check(dlg._parakeet_field.isVisibleTo(dlg)
+                  and not dlg._whisper_field.isVisibleTo(dlg),
+                  "parakeet engine did not show only the parakeet model field")
+            dlg.close()
+
+            # The pill's circular buttons open Settings (mic in rebind mode).
+            self.settings_dialog = None
+            self.reveal = 1.0
+            gear, mic = self._circles()
+            self.mousePressEvent(_Click(gear.center()))
+            check(self.settings_dialog is not None,
+                  "clicking the gear did not open Settings")
+            self.settings_dialog.hide()
+            self.mousePressEvent(_Click(mic.center()))
+            check(self.settings_dialog.hotkey._capturing,
+                  "clicking the mic did not open Settings in rebind mode")
+            self.settings_dialog.hotkey._stop_capture()
+            self.settings_dialog.hide()
+            self.reveal = 0.0
 
         # -- animation ------------------------------------------------------
 
