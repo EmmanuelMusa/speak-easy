@@ -511,6 +511,24 @@ def test_spoken_dot_only_touches_domains():
         "connect the dot to the line"
 
 
+def test_injected_vocab_dump_is_stripped_but_real_lists_kept():
+    from unittest.mock import MagicMock
+    from app.cleanup import Cleaner
+    from app.config import CleanupConfig
+    c = Cleaner(CleanupConfig(enabled=False))
+    c.training = MagicMock()
+    c.training.learned_vocab.return_value = [
+        "WebSockets", "Coren", "Parakeet", "PLLC", "CUDA", "Blusalt", "WEMA"]
+    # A trailing dump of learned-vocab terms the speaker never said -> stripped.
+    dumped = ("Focus on the donor tiers for now. "
+              "WebSockets, Coren, Parakeet, PLLC, CUDA, Blusalt, WEMA.")
+    assert c._strip_injected_vocab(dumped, "focus on the donor tiers for now") == \
+        "Focus on the donor tiers for now"
+    # A list the speaker actually dictated is kept (its words are in the raw).
+    said = "Buy milk, eggs, bread and butter."
+    assert c._strip_injected_vocab(said, "buy milk eggs bread and butter") == said
+
+
 def test_spoken_punctuation_brackets_and_quotes():
     from app.cleanup import _apply_spoken_punctuation as f
     assert f("make it in bracket less wide close bracket now") == \

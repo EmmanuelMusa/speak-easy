@@ -222,6 +222,10 @@ _LIST_ITEM_RE = re.compile(r"(?m)^\s*(?:\d+[.)]|[-*•])\s+")
 
 _WORD_RE = re.compile(r"[a-z']+")
 
+# The final segment of the text (after the last sentence end / newline), used to
+# spot a trailing comma-list the model dumped in — see _strip_injected_vocab.
+_TAIL_LIST_RE = re.compile(r"(?:^|[.!?\n])\s*([^.!?\n]+?)\s*[.!?]?\s*$")
+
 # Strong enumeration cues anywhere in the text — ordinals and "number N".
 # Two or more means the utterance is very likely a dictated list.
 _ENUM_STRONG_RE = re.compile(
@@ -662,7 +666,8 @@ class Cleaner:
         reformat_ok = reformat
 
         def finish(text: str) -> str:
-            return self._finish(text, reformat_ok, mid_sentence, continues_after)
+            out = self._finish(text, reformat_ok, mid_sentence, continues_after)
+            return self._strip_injected_vocab(out, model_text)
 
         if not self.cfg.enabled:
             return finish(local)
@@ -700,6 +705,32 @@ class Cleaner:
             return text
         return reformat_enumeration(text, self.cfg.list_indent)
 
+    def _strip_injected_vocab(self, text: str, raw: str) -> str:
+        """Defensive net: drop a trailing comma-list that is really the learned
+        vocabulary the model dumped into the output (terms the speaker never
+        said). A list the speaker DID dictate ("buy milk, eggs, bread") is kept,
+        because those words appear in the raw transcript."""
+        vocab = {t.lower() for t in self.cfg.custom_vocabulary}
+        if self.training is not None:
+            vocab |= {t.lower() for t in self.training.learned_vocab()}
+        if len(vocab) < 3 or "," not in text:
+            return text
+        m = _TAIL_LIST_RE.search(text)
+        if not m:
+            return text
+        items = [p.strip() for p in m.group(1).split(",") if p.strip()]
+        if len(items) < 3:
+            return text
+        raw_low = raw.lower()
+        hits = sum(1 for it in items
+                   if it.lower() in vocab and it.lower() not in raw_low)
+        if hits >= 3 and hits >= len(items) * 0.6:
+            kept = text[: m.start(1)].rstrip().rstrip(",.;:").rstrip()
+            if kept:
+                log.warning("Dropped an injected vocabulary list from the output")
+                return kept
+        return text
+
     def _ollama_clean(
         self, text: str, context: str | None = None, surrounding=None
     ) -> str:
@@ -707,10 +738,8 @@ class Cleaner:
         # a short utterance ("is it ready", "thanks so much") as a chat
         # message and answers it instead of formatting it.
         prompt = f"<transcript>\n{text}\n</transcript>"
-        vocab_terms = list(self.cfg.custom_vocabulary)
         system = SYSTEM_PROMPT
         if self.training is not None:
-            vocab_terms += self.training.learned_vocab()
             system += self.training.few_shot_block(text)
         if surrounding is not None and surrounding.before.strip():
             system += (
@@ -737,11 +766,12 @@ class Cleaner:
                 "consistent. NEVER copy its words into the output; process "
                 "only the transcript you are given."
             )
-        if vocab_terms:
-            vocab = ", ".join(dict.fromkeys(vocab_terms))  # dedupe, keep order
-            prompt = (
-                f"Preserve these terms spelled exactly as given: {vocab}.\n\n{prompt}"
-            )
+        # NOTE: we deliberately do NOT prepend a "Preserve these terms: ..."
+        # vocabulary list to the prompt. Small models occasionally dumped the
+        # whole list into the output as a spurious trailing paragraph. Term
+        # spelling is protected by the divergence guard (no paraphrase / no
+        # dropped words), and fixed names like "SpeakEasy" are normalized
+        # deterministically instead.
         # On battery the GPU is downclocked and generation takes several
         # times longer. A timeout tuned for AC power would abandon a
         # perfectly good response mid-generation and degrade to the local

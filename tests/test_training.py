@@ -155,7 +155,9 @@ def test_prune_vocab_drops_junk_and_dupes_keeps_terms(tmp_path):
     assert set(removed) == {"inserting", "concept", "Given this", "cuda"}
 
 
-def test_learned_vocab_merged_into_prompt(tmp_path):
+def test_learned_vocab_is_not_injected_into_prompt(tmp_path):
+    # Learned vocab must NOT be prepended to the prompt: small models sometimes
+    # dumped the whole term list into the output as a spurious paragraph.
     store = make_store(tmp_path)
     store._add_vocab(["Ogiop"])
     cfg = CleanupConfig(enabled=True)
@@ -165,8 +167,9 @@ def test_learned_vocab_merged_into_prompt(tmp_path):
     fake.raise_for_status.return_value = None
     with patch("app.cleanup.requests.post", return_value=fake) as mock_post:
         cleaner.clean("another long sentence that goes to the language model")
-    prompt = mock_post.call_args.kwargs["json"]["prompt"]
-    assert "Ogiop" in prompt
+    call = mock_post.call_args.kwargs["json"]
+    assert "Ogiop" not in call["prompt"]
+    assert "Preserve these terms" not in call["prompt"] + call.get("system", "")
 
 
 # --- overlay event dispatch ---------------------------------------------------
