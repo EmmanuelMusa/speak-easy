@@ -84,75 +84,15 @@ def test_remove_vocab_forgets_term(tmp_path):
     assert store.learned_vocab() == ["Kubernetes"]
 
 
-def test_vocab_mining_learns_substituted_words(tmp_path):
+def test_record_does_not_mine_vocabulary(tmp_path):
+    # Vocab mining was retired: recording a correction no longer grows the
+    # learned-vocab list (the list was never fed to the model after it started
+    # dumping itself into outputs). Corrections still feed few-shot examples.
     store = make_store(tmp_path)
-    store.record("meet with mr ogi up tomorrow", "Meet with Mr Ogi up tomorrow.",
-                 "bad", "Meet with Mr Ogiop tomorrow.")
-    assert "Ogiop" in store.learned_vocab()
-
-
-def test_vocab_mining_ignores_grammar_corrections(tmp_path):
-    store = make_store(tmp_path)
-    # A real correction from training_data.jsonl: the model prepended "But",
-    # the user wanted "What". That is a rewrite, not a misheard term, and must
-    # never become preserve-forever vocabulary.
-    store.record("But exactly send input", "But exactly send input.",
-                 "bad", "What exactly is send input?")
-    assert store.learned_vocab() == []
-
-
-def test_vocab_mining_ignores_plain_lowercase_reword(tmp_path):
-    store = make_store(tmp_path)
-    # Ordinary lowercase word swap (tense/word-choice) — not vocabulary.
-    store.record("we should handle it", "We should handle it.",
-                 "bad", "We should manage it.")
-    assert store.learned_vocab() == []
-
-
-def test_vocab_mining_learns_phonetic_mishear_with_caps(tmp_path):
-    store = make_store(tmp_path)
-    # Distinct term the model misheard phonetically -> keep it.
     store.record("use web sockets here", "Use web sockets here.",
                  "bad", "Use WebSockets here.")
-    assert "WebSockets" in store.learned_vocab()
-
-
-def test_vocab_mining_ignores_word_form_variants(tmp_path):
-    store = make_store(tmp_path)
-    # A tense/-ing edit is orthographically similar but is an ordinary word,
-    # not a term to preserve. (Regression: these polluted the vocab.)
-    store.record("we are inserted here", "We are inserted here.",
-                 "bad", "We are inserting here.")
     assert store.learned_vocab() == []
-
-
-def test_vocab_mining_ignores_capitalized_common_word(tmp_path):
-    store = make_store(tmp_path)
-    # An ordinary word the model merely capitalized is not a name/jargon term.
-    store.record("we do poling now", "We do poling now.",
-                 "bad", "We do Polling now.")
-    assert store.learned_vocab() == []
-
-
-def test_vocab_mining_learns_acronym(tmp_path):
-    store = make_store(tmp_path)
-    # A misheard acronym (spelling + caps) is worth preserving.
-    store.record("send it to wima bank", "Send it to wima bank.",
-                 "bad", "Send it to WEMA bank.")
-    assert "WEMA" in store.learned_vocab()
-
-
-def test_prune_vocab_drops_junk_and_dupes_keeps_terms(tmp_path):
-    store = make_store(tmp_path)
-    store._write_vocab(["WebSockets", "inserting", "CUDA", "concept",
-                        "Blusalt", "Given this", "cuda"])
-    removed = store.prune_vocab()
-    kept = store.learned_vocab()
-    assert "WebSockets" in kept and "CUDA" in kept and "Blusalt" in kept
-    assert "inserting" not in kept and "concept" not in kept
-    assert "Given this" not in kept       # capitalized common words
-    assert "cuda" not in kept             # case-insensitive duplicate of CUDA
-    assert set(removed) == {"inserting", "concept", "Given this", "cuda"}
+    assert store.corrections(n=None)          # the correction IS still stored
 
 
 def test_learned_vocab_is_not_injected_into_prompt(tmp_path):
@@ -291,14 +231,6 @@ def test_tags_default_to_empty_and_optional_fields_null(tmp_path):
     assert e["tags"] == []
     assert e["rating"] == 5
     assert e["transcript"] is None
-
-
-def test_stt_mishear_vocab_mined_from_transcript(tmp_path):
-    store = make_store(tmp_path)
-    # STT misheard the name; the true transcript carries the right spelling.
-    store.record("meet with mr ogi up", "Meet with Mr Ogi up.", "bad",
-                 ideal=None, transcript="meet with Mr Ogiop")
-    assert "Ogiop" in store.learned_vocab()
 
 
 def test_corrections_filter_by_ideal_not_verdict(tmp_path):

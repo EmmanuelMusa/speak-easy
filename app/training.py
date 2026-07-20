@@ -15,7 +15,6 @@ doubles as a dataset if a real fine-tune is ever wanted.
 
 from __future__ import annotations
 
-import difflib
 import json
 import logging
 import math
@@ -32,23 +31,10 @@ DATA_PATH = _ROOT / "training_data.jsonl"
 VOCAB_PATH = _ROOT / "learned_vocab.json"
 AUDIO_DIR = _ROOT / "training_audio"
 
-# Substituted spans longer than this are style changes, not vocabulary.
-_MAX_VOCAB_SPAN = 3
-_WORD_SPLIT_RE = re.compile(r"[^\w']+")
-
-# A genuine misheard term looks/sounds like what the model produced
-# ("web sockets" -> "WebSockets", "Ogi up" -> "Ogiop"). A grammatical rewrite
-# does not ("But" -> "What", "handled" -> "handle"). Below this
-# character-level similarity the substitution is a correction, not a mishear,
-# and must NOT be learned as preserve-forever vocabulary.
-_MISHEAR_SIMILARITY = 0.6
-
-# Ordinary English. A term made only of these is language the model rewrote,
-# not a name/acronym/jargon term to preserve — so it is never learned as
-# vocabulary. (Capitalization alone can't tell "Ogiop" the name from
-# "Whatever" the sentence-initial common word; a wordlist can.) Deliberately
-# broad on function words and the highest-frequency content words; a real
-# term ("Kubernetes", "WebSockets", "Ogiop") simply won't appear here.
+# Ordinary English stopwords, filtered out of the TF-IDF tokens used to retrieve
+# similar past corrections (see _tokens), so a shared function word can't drive a
+# match. Deliberately broad on function words and the highest-frequency content
+# words.
 _COMMON_WORDS = frozenset("""
 a an the and or but nor so to of in on at by for with from as than that which
 who whom whose this these those there here what whatever whichever whenever
@@ -154,11 +140,12 @@ class TrainingStore:
     def record(self, raw: str, output: str, verdict: str, ideal: str | None = None,
                *, rating: int | None = None, transcript: str | None = None,
                tags: list[str] | None = None, audio_path: str | None = None) -> None:
-        """Append one feedback entry and mine vocabulary. `verdict` is kept for
-        backward compatibility; `rating` (1-5), `transcript` (what the user
-        actually said) and `tags` are the richer signal. Mines TWO diffs: the
-        cleanup fix (output -> ideal) and the STT mishear (raw -> transcript),
-        both through the gated _mine_vocab so only genuine terms are learned."""
+        """Append one feedback entry. `verdict` is kept for backward
+        compatibility; `rating` (1-5), `transcript` (what the user actually
+        said) and `tags` are the richer signal. Corrections feed the cleanup
+        model as few-shot examples (see few_shot_block); vocabulary is no longer
+        mined — the term list it produced was never fed to the model after it
+        started dumping itself into outputs."""
         entry = {
             "ts": time.time(),
             "raw": raw,
@@ -173,14 +160,6 @@ class TrainingStore:
         with self._lock:
             with open(self.data_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        learned: list[str] = []
-        if ideal and ideal.strip() and ideal.strip() != output.strip():
-            learned += self._mine_vocab(output, ideal)
-        if transcript and transcript.strip() and transcript.strip() != raw.strip():
-            learned += self._mine_vocab(raw, transcript)
-        if learned:
-            self._add_vocab(learned)
-            log.info("Learned vocabulary: %s", learned)
 
     def save_audio(self, audio, sample_rate: int) -> str | None:
         """Write `audio` (a float32 mono ndarray in [-1, 1]) as a 16-bit PCM mono
@@ -312,95 +291,3 @@ class TrainingStore:
         self._write_vocab(
             [t for t in self.learned_vocab() if t.lower() != term.lower()]
         )
-
-    def prune_vocab(self) -> list[str]:
-        """Re-apply the current worth-preserving gate to the stored vocabulary,
-        dropping terms that no longer qualify (grammar/word-form junk learned
-        under looser rules) and case-insensitive duplicates. Returns the removed
-        terms. Rewrites the file only if something changed."""
-        vocab = self.learned_vocab()
-        kept: list[str] = []
-        seen: set[str] = set()
-        removed: list[str] = []
-        for term in vocab:
-            key = term.lower()
-            if key in seen:
-                removed.append(term)
-                continue
-            if self._worth_preserving(term):
-                kept.append(term)
-                seen.add(key)
-            else:
-                removed.append(term)
-        if removed:
-            self._write_vocab(kept)
-            log.info("Pruned %d junk/duplicate vocab terms: %s",
-                     len(removed), removed)
-        return removed
-
-    @staticmethod
-    def _preserve_shape(token: str) -> bool:
-        """True if `token`'s SPELLING is one a general model would plausibly get
-        wrong and so is worth preserving verbatim: an acronym (WEMA, PLLC,
-        CUDA), a camel/Pascal-cased identifier (WebSockets, iPhone), or a token
-        containing a digit (S3, H2O). A plain capitalized first letter is NOT a
-        signal here — that's handled separately as a proper-noun check."""
-        core = token.strip("'\".,")
-        if len(core) < 2:
-            return False
-        if any(c.isdigit() for c in core):
-            return True
-        letters = [c for c in core if c.isalpha()]
-        if len(letters) >= 2 and all(c.isupper() for c in letters):
-            return True                      # all-caps acronym
-        return any(c.isupper() for c in core[1:])  # internal caps
-
-    @staticmethod
-    def _worth_preserving(term: str) -> bool:
-        """True if `term` carries a name / acronym / jargon token worth
-        preserving forever. A token qualifies if it has a distinctive spelling
-        shape (acronym/camelCase/digits) OR is a proper noun — capitalized and
-        not ordinary English. Purely lowercase words ("inserting", "concept",
-        "route") and capitalized common words ("Given", "Amen", "Polling") are
-        rejected: those are grammar/word-form edits, not terms to preserve."""
-        for raw in term.split():
-            t = raw.strip("'\".,")
-            if TrainingStore._preserve_shape(t):
-                return True
-            if len(t) >= 3 and t[0].isupper() and t.lower() not in _COMMON_WORDS:
-                return True
-        return False
-
-    @staticmethod
-    def _mine_vocab(output: str, ideal: str) -> list[str]:
-        """Find short word substitutions where the model *misheard* a term
-        (names, jargon) — worth preserving. Two gates keep ordinary grammar
-        corrections out: the ideal term must look distinctive (not a plain
-        lowercase word), and it must be orthographically close to what the
-        model produced (a mishear, not a reword). Without these, every
-        correction like "But" -> "What" got saved as preserve-forever vocab
-        and polluted the cleanup prompt."""
-        out_words = [w for w in _WORD_SPLIT_RE.split(output) if w]
-        ideal_words = [w for w in _WORD_SPLIT_RE.split(ideal) if w]
-        sm = difflib.SequenceMatcher(
-            a=[w.lower() for w in out_words], b=[w.lower() for w in ideal_words]
-        )
-        terms: list[str] = []
-        for op, i1, i2, j1, j2 in sm.get_opcodes():
-            if op != "replace":
-                continue
-            if (i2 - i1) > _MAX_VOCAB_SPAN or (j2 - j1) > _MAX_VOCAB_SPAN:
-                continue
-            term = " ".join(ideal_words[j1:j2])
-            if len(term) < 3 or not any(c.isalpha() for c in term):
-                continue
-            if not TrainingStore._worth_preserving(term):
-                continue
-            was = " ".join(out_words[i1:i2])
-            similarity = difflib.SequenceMatcher(
-                None, was.lower().replace(" ", ""), term.lower().replace(" ", "")
-            ).ratio()
-            if similarity < _MISHEAR_SIMILARITY:
-                continue
-            terms.append(term)
-        return terms
