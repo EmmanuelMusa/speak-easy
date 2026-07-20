@@ -1131,9 +1131,9 @@ def main() -> int:
             p.end()
 
     class ReviewDialog(QtWidgets.QWidget):
-        """Browse and prune what training mode has learned: correction
-        examples and auto-learned vocabulary. Edits the same files the app
-        reads, so changes take effect on the next dictation."""
+        """Browse and prune what training mode has learned: voice-training
+        progress and correction examples. Edits the same files the app reads,
+        so changes take effect on the next dictation."""
 
         def __init__(self, target_pairs: int = 200):
             super().__init__(None, QtCore.Qt.WindowStaysOnTopHint)
@@ -1206,19 +1206,11 @@ def main() -> int:
             fr_c.setToolTip("Taught to the cleanup model as few-shot examples")
             self.corr_list = QtWidgets.QListWidget()
             lay_c.addWidget(self.corr_list)
-            outer.setStretchFactor(fr_c, 3)
+            outer.setStretchFactor(fr_c, 1)
 
-            # Vocabulary list.
-            fr_v, lay_v = card("VOCABULARY")
-            fr_v.setToolTip("Words the model must preserve exactly")
-            self.vocab_list = QtWidgets.QListWidget()
-            lay_v.addWidget(self.vocab_list)
-            outer.setStretchFactor(fr_v, 1)
-
-            for lw in (self.corr_list, self.vocab_list):
-                lw.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-                lw.setWordWrap(True)
-                lw.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+            self.corr_list.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+            self.corr_list.setWordWrap(True)
+            self.corr_list.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
 
             close = QtWidgets.QPushButton("Close")
             close.setCursor(QtCore.Qt.PointingHandCursor)
@@ -1250,15 +1242,15 @@ def main() -> int:
         def _reflow(self):
             """Size each list row to the viewport so its text wraps instead of
             being clipped, and its item grows to the wrapped height."""
-            for listw in (self.corr_list, self.vocab_list):
-                w = max(60, listw.viewport().width())
-                for i in range(listw.count()):
-                    row = listw.itemWidget(listw.item(i))
-                    if row is None:
-                        continue  # plain empty-state item
-                    row.setFixedWidth(w)
-                    row.adjustSize()
-                    listw.item(i).setSizeHint(QtCore.QSize(w, row.sizeHint().height()))
+            listw = self.corr_list
+            w = max(60, listw.viewport().width())
+            for i in range(listw.count()):
+                row = listw.itemWidget(listw.item(i))
+                if row is None:
+                    continue  # plain empty-state item
+                row.setFixedWidth(w)
+                row.adjustSize()
+                listw.item(i).setSizeHint(QtCore.QSize(w, row.sizeHint().height()))
 
         def resizeEvent(self, e):
             super().resizeEvent(e)
@@ -1278,7 +1270,6 @@ def main() -> int:
                     f"{self.target - n} more corrections with “what you actually "
                     "said” to reach the fine-tuning target.")
             self.corr_list.clear()
-            self.vocab_list.clear()
 
             def short(s, n=150):
                 s = " ".join(str(s).split())
@@ -1289,21 +1280,12 @@ def main() -> int:
                 text = f"“{short(e.get('raw',''))}”  →  “{short(e.get('ideal',''))}”"
                 self._add(self.corr_list, text,
                           lambda _=False, ts=ts: self._forget_corr(ts))
-            for term in dict.fromkeys(self.store.learned_vocab()):
-                self._add(self.vocab_list, term,
-                          lambda _=False, t=term: self._forget_vocab(t))
             if self.corr_list.count() == 0:
                 self.corr_list.addItem("No corrections yet.")
-            if self.vocab_list.count() == 0:
-                self.vocab_list.addItem("No learned words yet.")
             self._reflow()
 
         def _forget_corr(self, ts):
             self.store.delete_correction(ts)
-            self.refresh()
-
-        def _forget_vocab(self, term):
-            self.store.remove_vocab(term)
             self.refresh()
 
     # ------------------------------------------------------------- feedback
