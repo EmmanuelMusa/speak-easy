@@ -178,3 +178,32 @@ def test_model_deleting_the_emoji_entirely_falls_back():
     with mocked:
         out = cleaner.clean("can you send me the file thumbs up emoji")
     assert "👍" in out, out
+
+
+# --- runs of emoji ------------------------------------------------------------
+
+def test_emoji_run_loses_its_commas_and_spaces():
+    from app.emoji import collapse_emoji_runs as run
+    assert run("I like food, 😂, 👍, 🔥, 🚀.") == "I like food, 😂👍🔥🚀."
+    assert run("nice 😂 👍") == "nice 😂👍"
+
+
+def test_collapsing_keeps_what_comes_before_the_run():
+    """Only separators BETWEEN emoji go; the text leading into the run is the
+    speaker's punctuation and stays."""
+    from app.emoji import collapse_emoji_runs as run
+    assert run("just 🔥 alone") == "just 🔥 alone"
+    assert run("a 😂, and 👍") == "a 😂, and 👍"   # a word between: not a run
+
+
+def test_collapsing_handles_multi_codepoint_emoji():
+    """❤️ is heart + variation selector; a naive character class would split
+    it and leave the selector stranded."""
+    from app.emoji import collapse_emoji_runs as run
+    assert run("one ❤️, ❤️ two") == "one ❤️❤️ two"
+
+
+def test_spoken_run_collapses_end_to_end():
+    out = _cleaner().clean(
+        "i like food laughing emoji thumbs up emoji fire emoji rocket emoji")
+    assert "😂👍🔥🚀" in out, out

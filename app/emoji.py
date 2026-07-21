@@ -302,3 +302,36 @@ def apply_spoken_emoji(text: str) -> str:
 #: Every emoji this module can produce — used by the cleanup guard to notice a
 #: model that deleted one the speaker asked for.
 EMOJI_CHARS = frozenset(EMOJI)
+
+# Longest first again: "❤️" is two code points (heart + variation selector) and
+# must be tried before any single-code-point emoji that starts the same way.
+_EMOJI_ALT = "|".join(re.escape(c) for c in sorted(EMOJI, key=len, reverse=True))
+# An emoji, then the separator before the next one. The next emoji is a
+# lookahead so it is not consumed and can start the following match, which
+# collapses a whole run in a single pass.
+_EMOJI_SEPARATOR_RE = re.compile(
+    rf"({_EMOJI_ALT})[,\s]+(?=(?:{_EMOJI_ALT}))"
+)
+# Cheap reject: scanning the 187-branch alternation over a whole dictation costs
+# ~285µs even when there is no emoji in it. A regex character class is NOT the
+# way to rule that out — Python's re falls off a fast path when a class is full
+# of non-BMP code points and takes ~260µs, barely better. frozenset.isdisjoint
+# walks the string in C against a hash set: ~33µs for the same text.
+_EMOJI_LEAD_CHARS = frozenset(char[0] for char in EMOJI)
+
+
+def collapse_emoji_runs(text: str) -> str:
+    """Butt consecutive emoji together, dropping the commas and spaces between
+    them: "I like food, 😂, 👍, 🔥" -> "I like food, 😂👍🔥".
+
+    Dictating a list of emoji produces separators that read as punctuation in
+    speech but look wrong on screen — nobody types "😂, 👍". Only separators
+    BETWEEN emoji are removed; whatever precedes the run is left alone.
+
+    Separate from apply_spoken_emoji, and not gated on the marker word, because
+    the cleanup model often emits the emoji itself — by then "emoji" is gone
+    from the text and the marker-gated pass would skip it.
+    """
+    if not text or _EMOJI_LEAD_CHARS.isdisjoint(text):
+        return text
+    return _EMOJI_SEPARATOR_RE.sub(r"\1", text)

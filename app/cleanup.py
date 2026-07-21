@@ -24,7 +24,7 @@ import requests
 
 from . import power
 from .config import CleanupConfig
-from .emoji import EMOJI_CHARS, apply_spoken_emoji
+from .emoji import EMOJI_CHARS, apply_spoken_emoji, collapse_emoji_runs
 from .stt import collapse_ellipses
 
 log = logging.getLogger(__name__)
@@ -738,7 +738,8 @@ class Cleaner:
         if self.cfg.spoken_emoji:
             # Before capitalization, so casing is decided on the final text: an
             # emoji opening a sentence must not leave the next word lowercase.
-            text = apply_spoken_emoji(text)  # "fire emoji" -> "🔥"
+            text = apply_spoken_emoji(text)   # "fire emoji" -> "🔥"
+            text = collapse_emoji_runs(text)  # "😂, 👍, 🔥" -> "😂👍🔥"
         # Guarantee sentence-start capitalization the model may have missed —
         # but not the first letter when we're continuing a sentence at the caret
         # (flow_edit handles that lowercase continuation next).
