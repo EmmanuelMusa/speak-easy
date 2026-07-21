@@ -282,6 +282,7 @@ class PushToTalkApp:
             "cleanup_enabled": self.cfg.cleanup.enabled,
             "delivery_method": self.cfg.injection.delivery_method,
             "keep_warm": self.cfg.performance.keep_warm,
+            "spoken_emoji": self.cfg.cleanup.spoken_emoji,
             "target_pairs": self.cfg.training.target_pairs,
         }
 
@@ -326,6 +327,9 @@ class PushToTalkApp:
         self.cfg.performance.keep_warm = bool(
             values.get("keep_warm", self.cfg.performance.keep_warm)
         )
+        self.cfg.cleanup.spoken_emoji = bool(
+            values.get("spoken_emoji", self.cfg.cleanup.spoken_emoji)
+        )
 
         save_config_updates({
             "training": {
@@ -341,6 +345,7 @@ class PushToTalkApp:
             "cleanup": {
                 "ollama_model": self.cfg.cleanup.ollama_model,
                 "enabled": self.cfg.cleanup.enabled,
+                "spoken_emoji": self.cfg.cleanup.spoken_emoji,
             },
             "injection": {"delivery_method": self.cfg.injection.delivery_method},
             "performance": {"keep_warm": self.cfg.performance.keep_warm},

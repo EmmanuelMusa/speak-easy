@@ -1,7 +1,8 @@
 # Spoken emoji — design
 
 **Date:** 2026-07-21
-**Status:** approved
+**Status:** implemented — see "What testing changed" at the end, where the
+central assumption about the cleanup model turned out to be wrong.
 
 ## Problem
 
@@ -150,3 +151,62 @@ Deliberately excluded, each easy to add later, none worth the surface area now:
 - skin-tone modifiers
 - user-defined aliases in config
 - per-application gating
+
+---
+
+## What testing changed
+
+The design's central claim about pipeline placement was wrong, and running real
+utterances through qwen2.5:3b is what showed it. Recorded here because the
+reasoning that replaced it is not obvious from the code alone.
+
+### The model does the substitution itself
+
+The spec assumed the cleanup LLM would see the words "rocket emoji" and pass
+them through as ordinary text. It does not — it converts them to 🚀 on its own,
+unprompted. That tripped the divergence guard, which counts word characters:
+two words ("rocket", "emoji") vanished in favour of a character it cannot see,
+so it read as over-deletion. A correct result was thrown away and the local
+fallback used instead, costing the LLM's casing:
+
+    said : so i think we should ship it today rocket emoji
+    got  : So i think we should ship it today 🚀.     <- lowercase "i"
+
+### Substituting before the model is worse
+
+The spec named this as the two-line fix if the model misbehaved. It is not the
+fix. With emoji already in the prompt, the model sometimes **deletes** them:
+
+    said : can you send me the file thumbs up emoji
+    got  : Can you send me the file?                  <- emoji gone
+
+That is the failure mode the spec predicted for approach B, and it is worse
+than the guard problem, because nothing downstream can recover an emoji whose
+words are also gone.
+
+### What was actually done
+
+Keep the post-pass placement, and teach the guards about emoji instead:
+
+1. **The divergence guard compares in "emoji space".** Both the raw transcript
+   and the model's output go through `apply_spoken_emoji` before comparison, so
+   the guard is blind to which side did the substituting. Either the model
+   converts or the post-pass does; both normalize to the same text.
+2. **A separate check rejects output that lost an emoji** (`_dropped_emoji`).
+   An emoji is not a word character, so `too_divergent` cannot see one go
+   missing. This is not theoretical — asked for ☕, the model returned 🍵:
+
+       said : lets grab coffee emoji tomorrow morning
+       model: Lets grab 🍵 tomorrow morning.          <- wrong emoji
+       got  : Lets grab ☕ tomorrow morning.          <- guard caught it
+
+   The local fallback ran the same deterministic substitution, so it always has
+   the emoji the speaker actually asked for.
+
+### One unrelated bug this surfaced
+
+`capitalize_sentences` only capitalized when the very first character was a
+letter, so "🚀 ship it" stayed lowercase. Not emoji-specific — the same gap
+swallowed capitalization after any non-letter opener, including a quote or a
+bracket. It now skips leading non-alphanumerics, while stopping at the first
+digit so "42 apples are nice" is not turned into "42 Apples".

@@ -1027,6 +1027,12 @@ def main() -> int:
                 "Every few minutes, nudge the speech + cleanup models so they "
                 "don't unload while idle — so the first dictation after a pause "
                 "isn't slow. Uses a little VRAM and power.")
+            self.spoken_emoji = QtWidgets.QCheckBox(
+                "Insert emoji when you say their name")
+            self.spoken_emoji.setToolTip(
+                "Say \"fire emoji\" and get 🔥. The word \"emoji\" is required, "
+                "so ordinary speech is never changed — \"call the fire "
+                "department\" stays as it is.")
             self.delivery = QtWidgets.QComboBox()
             self.delivery.addItems(DELIVERY)
 
@@ -1098,6 +1104,7 @@ def main() -> int:
             behave.addWidget(self.training)
             behave.addWidget(self.replace)
             behave.addWidget(self.keep_warm)
+            behave.addWidget(self.spoken_emoji)
             field(behave, "Text delivery", self.delivery)
             self.review_btn = QtWidgets.QPushButton("Review what it has learned…")
             self.review_btn.setObjectName("link")
@@ -1164,6 +1171,7 @@ def main() -> int:
             self.ollama_model.setCurrentText(str(values.get("ollama_model", "llama3.1:8b")))
             self.cleanup.setChecked(bool(values.get("cleanup_enabled", True)))
             self.keep_warm.setChecked(bool(values.get("keep_warm", False)))
+            self.spoken_emoji.setChecked(bool(values.get("spoken_emoji", True)))
             self.delivery.setCurrentText(str(values.get("delivery_method", "clipboard")))
             self._target = int(values.get("target_pairs", 200))
             self._sync_engine_fields()
@@ -1181,6 +1189,7 @@ def main() -> int:
                     "ollama_model": self.ollama_model.currentText().strip(),
                     "cleanup_enabled": self.cleanup.isChecked(),
                     "keep_warm": self.keep_warm.isChecked(),
+                    "spoken_emoji": self.spoken_emoji.isChecked(),
                     "delivery_method": self.delivery.currentText(),
                 },
             })

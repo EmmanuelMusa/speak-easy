@@ -24,6 +24,7 @@ import requests
 
 from . import power
 from .config import CleanupConfig
+from .emoji import EMOJI_CHARS, apply_spoken_emoji
 from .stt import collapse_ellipses
 
 log = logging.getLogger(__name__)
@@ -501,6 +502,16 @@ def too_divergent(raw: str, cleaned: str) -> bool:
     return dropped > limit
 
 
+def _dropped_emoji(raw: str, cleaned: str) -> bool:
+    """True if `cleaned` has fewer of some emoji than `raw`. Both are expected
+    to have already been through apply_spoken_emoji, so this compares what the
+    speaker asked for against what survived the model."""
+    for char in EMOJI_CHARS:
+        if char in raw and cleaned.count(char) < raw.count(char):
+            return True
+    return False
+
+
 def capitalize_sentences(text: str, cap_first: bool = True) -> str:
     """Capitalize the start of each sentence: the very first letter (unless
     `cap_first` is False, e.g. a mid-sentence insertion) and the first letter
@@ -513,10 +524,21 @@ def capitalize_sentences(text: str, cap_first: bool = True) -> str:
     downstream used to fix them."""
     if not text:
         return text
-    if cap_first and text[0].isalpha():
-        text = text[0].upper() + text[1:]
+    if cap_first:
+        # Skip anything that isn't alphanumeric first, so a sentence opening
+        # with an emoji, a quote or a bracket still gets capitalized ("🚀 ship
+        # it" -> "🚀 Ship it"). Stopping at the first alphanumeric matters: in
+        # "42 apples are nice" the first LETTER is deep in the line, and
+        # capitalizing it would be wrong.
+        i = 0
+        while i < len(text) and not text[i].isalnum():
+            i += 1
+        if i < len(text) and text[i].isalpha():
+            text = text[:i] + text[i].upper() + text[i + 1:]
+    # Likewise mid-text: [^\w\s]* lets an emoji or an opening quote sit between
+    # the sentence ender and the word it introduces.
     return re.sub(
-        r"(?<![.\s][A-Za-z])([.?!]\s+)([a-z])",
+        r"(?<![.\s][A-Za-z])([.?!]\s+[^\w\s]*\s*)([a-z])",
         lambda m: m.group(1) + m.group(2).upper(),
         text,
     )
@@ -678,10 +700,27 @@ class Cleaner:
             return finish(local)
         if not polished:
             return finish(local)
-        if too_divergent(model_text, polished):
+        # Compare in "emoji space". The model often does the emoji substitution
+        # itself, and the raw guard then saw two words ("rocket emoji") dropped
+        # in favour of a character it doesn't count as a word — rejecting a
+        # perfectly good result. Normalizing both sides makes the guard blind to
+        # which side did the substituting.
+        guard_raw, guard_out = model_text, polished
+        if self.cfg.spoken_emoji:
+            guard_raw = apply_spoken_emoji(model_text)
+            guard_out = apply_spoken_emoji(polished)
+        if too_divergent(guard_raw, guard_out):
             log.warning(
                 "LLM output diverged from speech (%r); using local cleanup",
                 polished,
+            )
+            return finish(local)
+        if _dropped_emoji(guard_raw, guard_out):
+            # An emoji is invisible to too_divergent (not a word character), so
+            # a model that simply deletes one would sail through. The local
+            # fallback ran the same substitution and still has it.
+            log.warning(
+                "LLM dropped a spoken emoji (%r); using local cleanup", polished
             )
             return finish(local)
         return finish(polished)
@@ -696,6 +735,10 @@ class Cleaner:
         text = collapse_ellipses(text)
         text = _apply_spoken_dot(text)      # "one dot com" -> "one.com"
         text = _normalize_app_name(text)    # "speak easy" -> "SpeakEasy"
+        if self.cfg.spoken_emoji:
+            # Before capitalization, so casing is decided on the final text: an
+            # emoji opening a sentence must not leave the next word lowercase.
+            text = apply_spoken_emoji(text)  # "fire emoji" -> "🔥"
         # Guarantee sentence-start capitalization the model may have missed —
         # but not the first letter when we're continuing a sentence at the caret
         # (flow_edit handles that lowercase continuation next).

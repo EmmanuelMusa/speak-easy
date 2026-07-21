@@ -68,6 +68,10 @@ class CleanupConfig:
     # look like the ones your editor makes when you type them. Empty = flush left
     # (standard markdown); "\t" = one tab; or a run of spaces, e.g. "    ".
     list_indent: str = ""
+    # Say "fire emoji" (or "emoji fire") and get 🔥. The word "emoji" is
+    # required, so ordinary speech is never rewritten; an unknown name is left
+    # as words. See app/emoji.py for the vocabulary.
+    spoken_emoji: bool = True
 
 
 @dataclass
