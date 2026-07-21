@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import math
+import pathlib
 import queue
 import sys
 import threading
@@ -29,7 +30,23 @@ import time
 
 PILL_RGBA = (20, 20, 23)          # dark charcoal body
 BAR_RGBA = (237, 237, 240, 240)   # near-white waveform / icon / text
-ACCENT = (110, 150, 255)          # soft blue accent (hover, focus, Save)
+ACCENT = (110, 150, 255)          # soft blue accent (pill hover only)
+
+# --- Brand palette -----------------------------------------------------------
+# Sampled off the SpeakEasy logo (assets/logo-dark.png): its ring sweeps cyan at
+# 9 o'clock through blue and violet to magenta at 3 o'clock, on a near-black
+# navy. The windows below are themed from these; the pill and its waveform keep
+# their own neutral charcoal so the always-on-screen element stays quiet.
+BRAND_STOPS = (
+    (0.00, "#00c8ff"),   # cyan
+    (0.22, "#0088f8"),   # azure
+    (0.42, "#2a6df4"),   # blue
+    (0.58, "#5f4ff3"),   # indigo
+    (0.74, "#9d2dec"),   # violet
+    (0.88, "#da31ca"),   # magenta
+    (1.00, "#f51c6c"),   # pink
+)
+BRAND_INDIGO = (0x5f, 0x4f, 0xf3)  # single-colour stand-in for the sweep
 IDLE_ALPHA = 120
 ACTIVE_ALPHA = 216
 CHIP_ALPHA = 238
@@ -73,92 +90,104 @@ FEEDBACK_TAGS = ["misheard word", "wrong punctuation", "over-deleted",
                  "wrong casing", "bad list"]
 
 FEEDBACK_QSS = """
-QWidget#root { background:#1b1b1f; border:1px solid #2e2e34; border-radius:12px; }
-QLabel { color:#e7e7ea; font-size:12px; }
-QLabel#preview { color:#d8d8de; font-size:12px; }
+QWidget#root { background:#12141c; border:1px solid #262b3b; border-radius:12px; }
+QLabel { color:#e6e8ef; font-size:12px; }
+QLabel#preview { color:#d3d7e2; font-size:12px; }
 QLabel#title { color:#ffffff; font-size:13px; font-weight:700; }
-QLabel[role="flabel"] { color:#7f8695; font-size:10px; font-weight:700;
+QLabel[role="flabel"] { color:#7c85a0; font-size:10px; font-weight:700;
     letter-spacing:1.2px; }
-QLabel#ro { background:#141417; border:1px solid #27272d; border-radius:8px;
-    padding:7px 9px; color:#9a9aa2; }
-QPlainTextEdit { background:#232327; color:#e7e7ea; border:1px solid #3a3a44;
+QLabel#ro { background:#0d0f16; border:1px solid #232838; border-radius:8px;
+    padding:7px 9px; color:#949cb0; }
+QPlainTextEdit { background:#1b1f2d; color:#e6e8ef; border:1px solid #333a4e;
     border-radius:8px; padding:6px 8px; font-size:12px; }
-QPlainTextEdit:focus { border:1px solid #6e96ff; }
-QPushButton#link { background:transparent; color:#6e96ff; border:none;
+QPlainTextEdit:focus { border:1px solid #5f4ff3; }
+QPushButton#link { background:transparent; color:#8b93ff; border:none;
     font-size:12px; font-weight:600; }
-QPushButton#tag { background:#232327; color:#b9b9c0; border:1px solid #3b3b42;
+QPushButton#tag { background:#1b1f2d; color:#b6bccd; border:1px solid #333a4e;
     border-radius:11px; padding:4px 10px; font-size:11px; }
-QPushButton#tag:checked { background:#2a3350; color:#cdd8ff; border:1px solid #6e96ff; }
-QPushButton#ghost { background:#2a2a31; color:#e7e7ea; border:none;
+QPushButton#tag:checked { background:#2b2a63; color:#d5d2ff;
+    border:1px solid #5f4ff3; }
+QPushButton#ghost { background:#242a3a; color:#e6e8ef; border:none;
     border-radius:8px; padding:7px 13px; font-size:12px; }
-QPushButton#save { background:#6e96ff; color:#0f1220; border:none;
-    border-radius:8px; padding:7px 13px; font-size:12px; font-weight:700; }
+QPushButton#save { border:none; color:#ffffff; border-radius:8px;
+    padding:7px 13px; font-size:12px; font-weight:700;
+    background:qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #2a6df4, stop:1 #8b35e8); }
+QPushButton#save:hover { background:qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #3d7dff, stop:1 #a049f5); }
 """
 
-# Shared dark theme for the settings/review windows — matches the pill.
+# Shared theme for the settings/review windows, keyed to the logo: near-black
+# navy surfaces, indigo as the single flat accent, and the cyan->pink sweep
+# reserved for the brand mark, the progress ring and the primary button.
 DIALOG_QSS = """
-QWidget#root { background: #17171a; }
-QLabel { color: #e7e7ea; font-size: 12px; }
+QWidget#root { background: #101219; }
+QLabel { color: #e6e8ef; font-size: 12px; }
 QLabel#title { color: #ffffff; font-size: 16px; font-weight: 700; }
-QLabel#subtitle { color: #83838c; font-size: 11px; }
+QLabel#subtitle { color: #838ba2; font-size: 11px; }
 QLabel[role="section"] {
-    color: #7f8695; font-size: 10px; font-weight: 700; letter-spacing: 1.4px;
+    color: #7c85a0; font-size: 10px; font-weight: 700; letter-spacing: 1.4px;
     padding-top: 4px;
 }
-QLabel[role="field"] { color: #b9b9c0; font-size: 12px; }
-QCheckBox { color: #e7e7ea; font-size: 12px; spacing: 9px; }
+QLabel[role="field"] { color: #b6bccd; font-size: 12px; }
+QCheckBox { color: #e6e8ef; font-size: 12px; spacing: 9px; }
 QCheckBox::indicator {
     width: 17px; height: 17px; border-radius: 5px;
-    border: 1px solid #3b3b42; background: #232327;
+    border: 1px solid #333a4e; background: #1b1f2d;
 }
-QCheckBox::indicator:hover { border: 1px solid #6e96ff; }
+QCheckBox::indicator:hover { border: 1px solid #5f4ff3; }
 QCheckBox::indicator:checked {
-    background: #6e96ff; border: 1px solid #6e96ff;
+    background: #5f4ff3; border: 1px solid #7a66ff;
 }
 QLineEdit, QComboBox {
-    background: #232327; color: #e7e7ea; border: 1px solid #33333a;
+    background: #1b1f2d; color: #e6e8ef; border: 1px solid #2b3145;
     border-radius: 8px; padding: 7px 10px; font-size: 12px; min-height: 16px;
 }
-QLineEdit:focus, QComboBox:focus, QComboBox:on { border: 1px solid #6e96ff; }
+QLineEdit:focus, QComboBox:focus, QComboBox:on { border: 1px solid #5f4ff3; }
 QComboBox::drop-down { border: none; width: 22px; }
 QComboBox QAbstractItemView {
-    background: #232327; color: #e7e7ea; border: 1px solid #33333a;
+    background: #1b1f2d; color: #e6e8ef; border: 1px solid #2b3145;
     border-radius: 8px; padding: 4px; outline: none;
-    selection-background-color: #6e96ff; selection-color: #10121a;
+    selection-background-color: #5f4ff3; selection-color: #ffffff;
 }
 QListWidget {
-    background: #202024; color: #e7e7ea; border: 1px solid #2e2e34;
+    background: #161926; color: #e6e8ef; border: 1px solid #262b3b;
     border-radius: 8px; padding: 2px; outline: none;
 }
 QPushButton {
-    background: #2a2a31; color: #e7e7ea; border: none; border-radius: 8px;
+    background: #242a3a; color: #e6e8ef; border: none; border-radius: 8px;
     padding: 8px 15px; font-size: 12px;
 }
-QPushButton:hover { background: #34343d; }
+QPushButton:hover { background: #2e3549; }
 QPushButton#save {
-    background: #6e96ff; color: #0f1220; font-weight: 700;
+    color: #ffffff; font-weight: 700;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #2a6df4, stop:1 #8b35e8);
 }
-QPushButton#save:hover { background: #85a6ff; }
-QPushButton#quit { background: transparent; color: #d97070; padding-left: 4px; }
-QPushButton#quit:hover { background: #2c2022; color: #e88a8a; }
+QPushButton#save:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #3d7dff, stop:1 #a049f5);
+}
+QPushButton#quit { background: transparent; color: #e0687f; padding-left: 4px; }
+QPushButton#quit:hover { background: #2a1c26; color: #f5809a; }
 QPushButton#link {
-    background: transparent; color: #6e96ff; text-align: left; padding: 4px 2px;
+    background: transparent; color: #8b93ff; text-align: left; padding: 4px 2px;
 }
-QPushButton#link:hover { color: #90adff; }
-QFrame#sep { background: #26262c; max-height: 1px; border: none; }
+QPushButton#link:hover { color: #a9aeff; }
+QFrame#sep { background: #222735; max-height: 1px; border: none; }
 QFrame#card {
-    background: #1c1c21; border: 1px solid #2a2a31; border-radius: 13px;
+    background: #161926; border: 1px solid #252a3a; border-radius: 13px;
 }
 QLabel[role="card"] {
-    color: #7f8695; font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+    color: #7c85a0; font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
 }
 QLabel#brand { color: #ffffff; font-size: 17px; font-weight: 700; }
-QLabel#brandsub { color: #83838c; font-size: 11px; }
+QLabel#brandsub { color: #838ba2; font-size: 11px; }
 QPushButton#change {
-    background: #26262d; color: #cdd8ff; border: 1px solid #3a3a44;
+    background: #222839; color: #c3caff; border: 1px solid #333a4e;
     border-radius: 8px; padding: 6px 12px; font-size: 11px; font-weight: 600;
 }
-QPushButton#change:hover { background: #2f3040; border: 1px solid #6e96ff; }
+QPushButton#change:hover { background: #2b3247; border: 1px solid #5f4ff3; }
 """
 
 
@@ -171,6 +200,11 @@ def main() -> int:
     from PySide6 import QtCore, QtGui, QtWidgets
 
     app = QtWidgets.QApplication([])
+    # Taskbar / alt-tab icon: the full logo, wordmark and all, since it is shown
+    # large enough to read there.
+    _icon = pathlib.Path(__file__).resolve().parent.parent / "assets" / "icon-256.png"
+    if _icon.exists():
+        app.setWindowIcon(QtGui.QIcon(str(_icon)))
     commands: "queue.Queue[tuple[str, str]]" = queue.Queue()
 
     def _gear_path(center, r_out: float, r_in: float, hole: float,
@@ -239,6 +273,50 @@ def main() -> int:
         p.drawLine(QtCore.QPointF(cx, stem_top), QtCore.QPointF(cx, base_y))
         p.drawLine(QtCore.QPointF(cx - d * 0.22, base_y),
                    QtCore.QPointF(cx + d * 0.22, base_y))
+
+    def _brand_gradient(x0, y0, x1, y1):
+        """The logo's left-to-right colour sweep as a paintable gradient."""
+        g = QtGui.QLinearGradient(x0, y0, x1, y1)
+        for pos, hexc in BRAND_STOPS:
+            g.setColorAt(pos, QtGui.QColor(hexc))
+        return g
+
+    # The logo's waveform, as (x fraction, amplitude) with amplitude in -1..1.
+    # One tall spike just left of centre, decaying wiggles either side, flat as
+    # it leaves through the ring's gaps.
+    _WAVE = ((0.00, 0.00), (0.15, 0.00), (0.20, 0.20), (0.25, -0.30),
+             (0.30, 0.45), (0.35, -0.25), (0.40, 0.32), (0.44, -0.55),
+             (0.48, 1.00), (0.53, -0.88), (0.58, 0.38), (0.63, -0.32),
+             (0.67, 0.58), (0.72, -0.42), (0.77, 0.28), (0.82, -0.16),
+             (0.87, 0.10), (0.92, 0.00), (1.00, 0.00))
+    # Same silhouette with the fine wiggles dropped. Below ~64px the full set
+    # packs peaks closer than the stroke is wide and they smear into a blob.
+    _WAVE_SMALL = ((0.00, 0.00), (0.18, 0.00), (0.28, 0.34), (0.36, -0.40),
+                   (0.48, 1.00), (0.57, -0.80), (0.66, 0.52), (0.74, -0.30),
+                   (0.84, 0.00), (1.00, 0.00))
+
+    def _draw_brand_mark(p, cx, cy, d):
+        """The app logo: a gradient ring, broken at 3 and 9 o'clock where a
+        waveform runs straight through it. Drawn as vectors rather than scaling
+        assets/logo-dark.png, which carries a wordmark that turns to mush below
+        about 120px."""
+        pen = QtGui.QPen(QtGui.QBrush(_brand_gradient(cx - d / 2, cy,
+                                                      cx + d / 2, cy)),
+                         max(1.3, d * 0.085))
+        pen.setCapStyle(QtCore.Qt.RoundCap)
+        pen.setJoinStyle(QtCore.Qt.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(QtCore.Qt.NoBrush)
+        r = d * 0.42
+        ring = QtCore.QRectF(cx - r, cy - r, r * 2, r * 2)
+        p.drawArc(ring, 12 * 16, 156 * 16)    # top arc, gap at each side
+        p.drawArc(ring, 192 * 16, 156 * 16)   # bottom arc
+        path = QtGui.QPainterPath()
+        w, amp = d * 0.98, d * 0.30
+        for i, (fx, fa) in enumerate(_WAVE if d >= 64 else _WAVE_SMALL):
+            pt = QtCore.QPointF(cx - w / 2 + fx * w, cy - fa * amp)
+            path.moveTo(pt) if i == 0 else path.lineTo(pt)
+        p.drawPath(path)
 
     def _shortcut_keys(binding: str):
         """Split a hotkey binding ("Control + Shift + Space") into display key
@@ -424,6 +502,16 @@ def main() -> int:
                 d = SettingsDialog(self.settings)
                 d.ensurePolished()
                 d.resize(d.sizeHint())
+                d.grab().save(arg)
+                d.deleteLater()
+                emit({"type": "shot_ok"})
+            elif cmd == "shotfeedback":  # debug: screenshot the feedback popup
+                d = FeedbackPanel(self, {
+                    "id": 1, "raw": "so lets ship the emoji thing today",
+                    "cleaned": "So let's ship the emoji thing today."})
+                d.ensurePolished()
+                d.resize(d.sizeHint())
+                QtWidgets.QApplication.processEvents()
                 d.grab().save(arg)
                 d.deleteLater()
                 emit({"type": "shot_ok"})
@@ -765,8 +853,8 @@ def main() -> int:
                 Q.Key_PageUp: "page_up", Q.Key_PageDown: "page_down"}.get(key)
 
     class BrandMark(QtWidgets.QWidget):
-        """Small circular app mark — a mic in a blue-tinted disc — echoing the
-        mic button on the pill so the settings window reads as the same app."""
+        """The app logo at header size — the same gradient ring and waveform as
+        assets/logo-dark.png, so a window reads as SpeakEasy at a glance."""
 
         def __init__(self, d: int = 40):
             super().__init__()
@@ -776,12 +864,7 @@ def main() -> int:
         def paintEvent(self, _e):
             p = QtGui.QPainter(self)
             p.setRenderHint(QtGui.QPainter.Antialiasing)
-            r = QtCore.QRectF(0.5, 0.5, self._d - 1, self._d - 1)
-            p.setPen(QtGui.QPen(QtGui.QColor(0x3a, 0x46, 0x74), 1.0))
-            p.setBrush(QtGui.QColor(0x22, 0x28, 0x3f))
-            p.drawEllipse(r)
-            _draw_mic(p, self._d / 2, self._d / 2, self._d * 0.46,
-                      QtGui.QColor(0x9d, 0xb4, 0xff))
+            _draw_brand_mark(p, self._d / 2, self._d / 2, self._d)
             p.end()
 
     class ShortcutField(QtWidgets.QWidget):
@@ -888,7 +971,7 @@ def main() -> int:
     class SettingsDialog(QtWidgets.QWidget):
         def __init__(self, values: dict):
             super().__init__(None, QtCore.Qt.WindowStaysOnTopHint)
-            self.setWindowTitle("Speak Easy Settings")
+            self.setWindowTitle("SpeakEasy Settings")
             self.setObjectName("root")
             self.setStyleSheet(DIALOG_QSS)
             self.setFixedWidth(384)
@@ -932,7 +1015,7 @@ def main() -> int:
             header.addWidget(BrandMark())
             brand = QtWidgets.QVBoxLayout()
             brand.setSpacing(1)
-            name = QtWidgets.QLabel("Speak Easy")
+            name = QtWidgets.QLabel("SpeakEasy")
             name.setObjectName("brand")
             sub = QtWidgets.QLabel("Dictation settings")
             sub.setObjectName("brandsub")
@@ -1004,7 +1087,7 @@ def main() -> int:
             quit_btn.setObjectName("quit")
             quit_btn.setCursor(QtCore.Qt.PointingHandCursor)
             quit_btn.setToolTip(
-                "Fully close Speak Easy (frees the hotkey and the "
+                "Fully close SpeakEasy (frees the hotkey and the "
                 "single-instance lock so you can start it again)"
             )
             save = QtWidgets.QPushButton("Save")
@@ -1103,14 +1186,32 @@ def main() -> int:
             w = 9.0
             ring = QtCore.QRectF(w / 2 + 1, w / 2 + 1,
                                  self._d - w - 2, self._d - w - 2)
-            track = QtGui.QPen(QtGui.QColor(0x2a, 0x2a, 0x33), w)
+            track = QtGui.QPen(QtGui.QColor(0x22, 0x27, 0x35), w)
             track.setCapStyle(QtCore.Qt.RoundCap)
             p.setPen(track)
             p.drawArc(ring, 0, 360 * 16)
             frac = min(1.0, self._val / self._max)
             done = frac >= 1.0
-            arc = QtGui.QPen(QtGui.QColor(0x74, 0xd0, 0x9a) if done
-                             else QtGui.QColor(0x6e, 0x96, 0xff), w)
+            # The filled arc carries the logo's sweep, conical so the colour
+            # follows the angle the way the logo's ring does. The stops are
+            # squeezed onto the drawn arc (scaled by `frac`) rather than around
+            # the whole circle, so the ring shows the complete cyan -> pink
+            # gradient at any fill level. Positions run backwards from 1.0
+            # because a conical gradient advances anticlockwise in maths terms,
+            # which is clockwise on screen, and the arc is drawn clockwise from
+            # 12 o'clock. A finished ring goes green so "complete" reads
+            # without having to count.
+            if done:
+                brush = QtGui.QBrush(QtGui.QColor(0x74, 0xd0, 0x9a))
+            else:
+                cone = QtGui.QConicalGradient(self._d / 2, self._d / 2, 90.0)
+                first = QtGui.QColor(BRAND_STOPS[0][1])
+                cone.setColorAt(0.0, first)  # kills the seam at 12 o'clock
+                for pos, hexc in BRAND_STOPS:
+                    cone.setColorAt(max(0.0, 1.0 - pos * frac),
+                                    QtGui.QColor(hexc))
+                brush = QtGui.QBrush(cone)
+            arc = QtGui.QPen(brush, w)
             arc.setCapStyle(QtCore.Qt.RoundCap)
             p.setPen(arc)
             p.drawArc(ring, 90 * 16, -int(round(360 * frac)) * 16)
@@ -1157,7 +1258,7 @@ def main() -> int:
             brand.setSpacing(1)
             t = QtWidgets.QLabel("Review learnings")
             t.setObjectName("brand")
-            s = QtWidgets.QLabel("What Speak Easy has picked up from you")
+            s = QtWidgets.QLabel("What SpeakEasy has picked up from you")
             s.setObjectName("brandsub")
             brand.addWidget(t)
             brand.addWidget(s)
@@ -1249,8 +1350,16 @@ def main() -> int:
                 if row is None:
                     continue  # plain empty-state item
                 row.setFixedWidth(w)
-                row.adjustSize()
-                listw.item(i).setSizeHint(QtCore.QSize(w, row.sizeHint().height()))
+                # sizeHint() ignores word-wrap, so a long correction reports the
+                # height of a single line and the rows clip into each other.
+                # heightForWidth is the only figure that accounts for wrapping.
+                lay = row.layout()
+                h = lay.heightForWidth(w) if lay.hasHeightForWidth() else -1
+                if h <= 0:
+                    row.adjustSize()
+                    h = row.sizeHint().height()
+                listw.item(i).setSizeHint(QtCore.QSize(w, h))
+                row.setFixedHeight(h)
 
         def resizeEvent(self, e):
             super().resizeEvent(e)
@@ -1329,9 +1438,12 @@ def main() -> int:
                 cy = (s + 4) / 2
                 path = _star_path(cx, cy, s / 2, s / 4.4)
                 if i < self._rating:
-                    p.fillPath(path, QtGui.QColor(*ACCENT))
+                    # Filled stars ride the brand sweep across the whole row,
+                    # so five stars reads as the logo's gradient.
+                    p.fillPath(path, QtGui.QBrush(_brand_gradient(
+                        0, 0, self._count * self._cell, 0)))
                 else:
-                    pen = QtGui.QPen(QtGui.QColor(74, 74, 84))
+                    pen = QtGui.QPen(QtGui.QColor(58, 64, 84))
                     pen.setWidthF(1.4)
                     p.setPen(pen)
                     p.setBrush(QtCore.Qt.NoBrush)
@@ -1466,7 +1578,7 @@ def main() -> int:
             self._preview.hide()
 
             title_row = QtWidgets.QHBoxLayout()
-            title = QtWidgets.QLabel("Teach Speak Easy")
+            title = QtWidgets.QLabel("Teach SpeakEasy")
             title.setObjectName("title")
             self._form_stars = StarBar()
             self._form_stars.setRating(self._stars.rating())

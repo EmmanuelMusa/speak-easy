@@ -15,7 +15,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m app",
         description=(
-            "Speak Easy: fully local push-to-talk dictation "
+            "SpeakEasy: fully local push-to-talk dictation "
             "(faster-whisper + Ollama cleanup + cursor injection)."
         ),
     )

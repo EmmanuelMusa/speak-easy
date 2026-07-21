@@ -528,7 +528,7 @@ class Injector:
             "The app didn't accept the dictated text. It's on your "
             "clipboard — click where you want it and press Ctrl+V."
         )
-        ctypes.windll.user32.MessageBoxW(0, msg, "Speak Easy", 0x40)
+        ctypes.windll.user32.MessageBoxW(0, msg, "SpeakEasy", 0x40)
 
     def replace_last(self, new_text: str) -> bool:
         """Replace the text we last injected with `new_text`, but only if it

@@ -44,11 +44,11 @@ def release() -> None:
 def notify_already_running() -> None:
     """Tell the user why this launch is exiting, console or not."""
     msg = (
-        "Speak Easy is already running — check the pill at the bottom "
+        "SpeakEasy is already running — check the pill at the bottom "
         "of your screen. Only one instance can own the hotkey."
     )
     if sys.stderr is not None and sys.stderr.isatty():
         print(msg, file=sys.stderr)
     else:
         # pythonw launch: no console, so use a message box (0x40 = info icon).
-        ctypes.windll.user32.MessageBoxW(0, msg, "Speak Easy", 0x40)
+        ctypes.windll.user32.MessageBoxW(0, msg, "SpeakEasy", 0x40)

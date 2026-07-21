@@ -5,3 +5,4 @@ __pycache__/
 training_data.jsonl
 learned_vocab.json
 training_audio/
+speakeasy.log

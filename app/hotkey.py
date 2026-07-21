@@ -40,7 +40,7 @@ def _notify_user(msg: str) -> None:
         pass
     try:
         import ctypes
-        ctypes.windll.user32.MessageBoxW(0, msg, "Speak Easy", 0x30)
+        ctypes.windll.user32.MessageBoxW(0, msg, "SpeakEasy", 0x30)
     except Exception:
         pass
 
@@ -430,7 +430,7 @@ class PushToTalkApp:
                 }})
                 self.overlay.send_settings(self._settings_snapshot())
             _notify_user(
-                f"Couldn't load the '{attempted}' speech engine, so Speak Easy "
+                f"Couldn't load the '{attempted}' speech engine, so SpeakEasy "
                 f"kept your previous engine and dictation still works.\n\n"
                 f"{exc}"
             )
@@ -508,7 +508,7 @@ class PushToTalkApp:
             except Exception as exc:
                 log.error("STT engine failed to load (%s)", exc)
                 _notify_user(
-                    f"Speak Easy is running, but the '{self.cfg.stt.engine}' "
+                    f"SpeakEasy is running, but the '{self.cfg.stt.engine}' "
                     f"speech engine failed to load, so dictation won't work "
                     f"until it's fixed. Check the log, then restart — or pick a "
                     f"different engine in Settings.\n\n{exc}"
@@ -523,7 +523,7 @@ class PushToTalkApp:
         ])
         gh.start_checking_hotkeys()
         log.info(
-            "Speak Easy ready. Hold '%s' to dictate; Ctrl+C here or the "
+            "SpeakEasy ready. Hold '%s' to dictate; Ctrl+C here or the "
             "Quit button in settings to quit.",
             self.cfg.hotkey.binding,
         )
