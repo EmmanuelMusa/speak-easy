@@ -17,7 +17,7 @@ streaming = true
 # Speech-to-text engine: "whisper" (faster-whisper, streaming) or "parakeet"
 # (NVIDIA Parakeet TDT via onnx-asr — run: pip install -r requirements-parakeet.txt;
 # for GPU: pip uninstall onnxruntime && pip install onnxruntime-gpu). Non-streaming.
-engine = "whisper"
+engine = "parakeet"
 parakeet_model = "nemo-parakeet-tdt-0.6b-v2"
 # Parakeet-on-GPU only: folder where the CUDA-13 runtime was installed
 # (pip install --target <dir> nvidia-*-cu13). Kept separate from faster-whisper's
@@ -34,8 +34,9 @@ enabled = true
 streaming = false
 # Use 127.0.0.1 (not "localhost") — avoids a ~2s IPv6 fallback on Windows.
 ollama_url = "http://127.0.0.1:11434"
-# Cleanup model: llama3.2:3b (fast) | llama3.1:8b | phi3:mini | mistral:7b
-ollama_model = "llama3.1:8b"
+# Cleanup model: qwen2.5:3b (benchmarked fastest + best quality here) |
+# llama3.2:3b | llama3.1:8b | phi3:mini | mistral:7b
+ollama_model = "qwen2.5:3b"
 # Every utterance goes through the LLM, however short — that's what gets
 # "is it ready" typed as "Is it ready?" (Wispr Flow behavior).
 # Seconds to wait for Ollama before falling back to the local-only cleanup.
@@ -49,8 +50,18 @@ battery_timeout_multiplier = 4.0
 # Flip this and restart to A/B the two. The offline fallback (AI off/unreachable)
 # always keeps the pause punctuation either way.
 punctuation_source = "model"
-# Personal dictionary: terms the LLM must preserve/spell exactly.
+# Personal dictionary: terms the LLM must preserve/spell exactly. (The app's own
+# name, "SpeakEasy", is handled deterministically in cleanup — no need to list
+# it here, and listing single terms can make small models inject them.)
 custom_vocabulary = []
+# Indentation for numbered/bulleted list items, so a pasted list looks like one
+# you typed. "" = flush left; "\t" = one tab; "    " = four spaces.
+list_indent = "\t"
+# Say "fire emoji" (or "emoji fire") and get 🔥. The word "emoji" is required,
+# so ordinary speech is never rewritten ("call the fire department" is left
+# alone) and an unknown name stays as words. Consecutive emoji are butted
+# together, dropping the comma you paused on. Vocabulary: app/emoji.py.
+spoken_emoji = true
 
 [injection]
 # "clipboard" = copy + Ctrl+V (fast, reliable; clipboard is saved & restored)
@@ -115,3 +126,17 @@ channels = 1
 # get non-visual confirmation the press registered.
 start_sound = true
 start_sound_volume = 0.3
+# Recordings quieter than this are treated as silence and produce NO text, so a
+# no-VAD engine (Parakeet) can't hallucinate a ghost word on an empty clip.
+# Lower if quiet speech is dropped; raise if silence still gets through.
+silence_floor = 0.006
+
+[performance]
+# Keep the speech + cleanup models warm: every keep_warm_interval_seconds, run a
+# tiny idle inference on the STT engine and ping Ollama so neither unloads and
+# the first dictation after a long pause isn't slow. Off by default — it holds
+# VRAM and uses a little power while idle. Toggle it in Settings.
+# 1500s (25 min) sits just under Ollama's 30-min keep_alive: enough to stop it
+# unloading, without over-pinging the GPU.
+keep_warm = false
+keep_warm_interval_seconds = 1500.0
