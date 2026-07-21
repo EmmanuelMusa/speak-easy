@@ -5,7 +5,7 @@ feedback verdicts) as JSON lines on the child's stdout:
 
     parent -> child : state / level / settings / feedback   (see overlay_ui)
     child -> parent : {"type": "settings_saved", ...} / {"type": "feedback", ...}
-                      / {"type": "quit"}
+                      / {"type": "quit"} / {"type": "restart"}
 
 Assign `on_settings` and `on_feedback` callables to receive events. If
 PySide6 isn't installed the overlay disables itself gracefully — dictation
@@ -38,7 +38,8 @@ class Overlay:
         #: callbacks the app assigns
         self.on_settings = None   # fn(values: dict)
         self.on_feedback = None   # fn(raw, output, rating, transcript, ideal, tags)
-        self.on_quit = None       # fn() — user hit Quit in the settings dialog
+        self.on_quit = None       # fn() — user hit Quit in settings or the tray
+        self.on_restart = None    # fn() — user hit Restart in the tray
 
     # -- public API (thread-safe) -----------------------------------------
 
@@ -153,6 +154,8 @@ class Overlay:
         kind = event.get("type")
         if kind == "quit" and self.on_quit:
             self.on_quit()
+        elif kind == "restart" and self.on_restart:
+            self.on_restart()
         elif kind == "settings_saved" and self.on_settings:
             self.on_settings(event.get("values", {}))
         elif kind == "feedback":

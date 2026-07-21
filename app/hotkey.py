@@ -90,7 +90,9 @@ class PushToTalkApp:
         self.overlay.on_settings = self._apply_settings
         self.overlay.on_feedback = self._record_feedback
         self._quit = threading.Event()
+        self._restart = False
         self.overlay.on_quit = self._quit.set
+        self.overlay.on_restart = self._request_restart
         self._busy = threading.Lock()
         self._session: StreamingSession | None = None
         self._live: LiveCleanup | None = None
@@ -543,3 +545,44 @@ class PushToTalkApp:
             gh.stop_checking_hotkeys()
             self.overlay.close()
             log.info("Stopped.")
+        if self._restart:
+            self._exec_restart()
+
+    def _request_restart(self) -> None:
+        """Tray -> Restart. Flagged rather than acted on here, so the normal
+        shutdown still runs (hotkeys released, overlay child closed, the
+        single-instance lock dropped) before the new process starts and tries
+        to claim all three."""
+        self._restart = True
+        self._quit.set()
+
+    def _exec_restart(self) -> None:
+        """Start a fresh copy of the app and let this one exit."""
+        import ctypes
+        import os
+        import subprocess
+        import sys
+
+        from . import single_instance
+
+        argv = [sys.executable, "-m", "app"] + sys.argv[1:]
+        # Hand the named mutex over before the replacement launches, or it sees
+        # "already running" and bows out — this process has not exited yet.
+        single_instance.release()
+        flags = 0
+        if sys.platform == "win32":
+            ctypes.windll.kernel32.GetConsoleWindow.restype = ctypes.c_void_p
+            has_console = bool(ctypes.windll.kernel32.GetConsoleWindow())
+            # Inheriting this console would interleave the new app's logs with
+            # the old launcher's exit (the .bat's "pause"). Give it a console of
+            # its own when we had one, and none when we didn't (pythonw or a
+            # shortcut) so no window flashes up.
+            flags = 0x00000010 if has_console else 0x00000008
+        log.info("Restarting: %s", " ".join(argv))
+        try:
+            # A new process, not execv: a wedged CUDA/ONNX runtime is the usual
+            # reason to reach for Restart, and only a fresh process sheds it.
+            subprocess.Popen(argv, cwd=os.getcwd(), close_fds=True,
+                             creationflags=flags)
+        except Exception:
+            log.exception("Restart failed; the app has stopped")

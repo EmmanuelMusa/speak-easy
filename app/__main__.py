@@ -57,6 +57,11 @@ def main(argv: list[str] | None = None) -> int:
         handlers=handlers,
     )
 
+    # Taskbar identity + console title/icon, before anything opens a window.
+    from . import branding
+
+    branding.apply()
+
     from .config import load_config
 
     cfg = load_config(args.config)

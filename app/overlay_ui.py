@@ -32,21 +32,12 @@ PILL_RGBA = (20, 20, 23)          # dark charcoal body
 BAR_RGBA = (237, 237, 240, 240)   # near-white waveform / icon / text
 ACCENT = (110, 150, 255)          # soft blue accent (pill hover only)
 
-# --- Brand palette -----------------------------------------------------------
-# Sampled off the SpeakEasy logo (assets/logo-dark.png): its ring sweeps cyan at
-# 9 o'clock through blue and violet to magenta at 3 o'clock, on a near-black
-# navy. The windows below are themed from these; the pill and its waveform keep
-# their own neutral charcoal so the always-on-screen element stays quiet.
-BRAND_STOPS = (
-    (0.00, "#00c8ff"),   # cyan
-    (0.22, "#0088f8"),   # azure
-    (0.42, "#2a6df4"),   # blue
-    (0.58, "#5f4ff3"),   # indigo
-    (0.74, "#9d2dec"),   # violet
-    (0.88, "#da31ca"),   # magenta
-    (1.00, "#f51c6c"),   # pink
-)
-BRAND_INDIGO = (0x5f, 0x4f, 0xf3)  # single-colour stand-in for the sweep
+# --- Brand ------------------------------------------------------------------
+# The mark and its colour sweep live in app/logo.py, which tools/make_icon.py
+# also draws from, so the tray icon and these windows can never drift apart.
+# It is imported inside main() with the rest of the Qt-dependent code.
+# The pill and its waveform keep their own neutral charcoal above: the
+# always-on-screen element stays quiet.
 IDLE_ALPHA = 120
 ACTIVE_ALPHA = 216
 CHIP_ALPHA = 238
@@ -190,6 +181,18 @@ QPushButton#change {
 QPushButton#change:hover { background: #2b3247; border: 1px solid #5f4ff3; }
 """
 
+# The tray's right-click menu, matched to the windows above so the app looks
+# like one thing wherever you meet it.
+TRAY_QSS = """
+QMenu {
+    background: #161926; color: #e6e8ef; border: 1px solid #262b3b;
+    border-radius: 8px; padding: 6px; font-size: 12px;
+}
+QMenu::item { padding: 7px 28px 7px 14px; border-radius: 6px; }
+QMenu::item:selected { background: #5f4ff3; color: #ffffff; }
+QMenu::separator { height: 1px; background: #262b3b; margin: 5px 8px; }
+"""
+
 
 def emit(obj: dict) -> None:
     sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
@@ -199,12 +202,29 @@ def emit(obj: dict) -> None:
 def main() -> int:
     from PySide6 import QtCore, QtGui, QtWidgets
 
+    # This is a separate process from the hotkey loop, so it needs the taskbar
+    # identity set here too — without it Windows files our windows under Python.
+    # No console of our own (we're spawned with CREATE_NO_WINDOW).
+    from . import branding, logo
+
+    # The mark and its sweep come from app/logo.py, which tools/make_icon.py
+    # draws the tray icon from too, so the two can never drift apart.
+    BRAND_STOPS = logo.BRAND_STOPS
+    _brand_gradient = logo.gradient
+    _draw_brand_mark = logo.draw_mark
+
+    branding.set_app_id()
     app = QtWidgets.QApplication([])
-    # Taskbar / alt-tab icon: the full logo, wordmark and all, since it is shown
-    # large enough to read there.
-    _icon = pathlib.Path(__file__).resolve().parent.parent / "assets" / "icon-256.png"
-    if _icon.exists():
-        app.setWindowIcon(QtGui.QIcon(str(_icon)))
+    app.setApplicationName(branding.APP_NAME)
+    # Prefer the .ico: it carries every size Windows asks for, so the tray and
+    # Alt+Tab each get a purpose-made bitmap instead of one downscaled PNG.
+    _icon_path = (branding.ICO_PATH if branding.ICO_PATH.exists()
+                  else branding.PNG_PATH)
+    APP_ICON = QtGui.QIcon(str(_icon_path)) if _icon_path.exists() else QtGui.QIcon()
+    app.setWindowIcon(APP_ICON)
+    # The tray icon is the app's only persistent handle once the console is
+    # gone, so closing the last window must not end the process.
+    app.setQuitOnLastWindowClosed(False)
     commands: "queue.Queue[tuple[str, str]]" = queue.Queue()
 
     def _gear_path(center, r_out: float, r_in: float, hole: float,
@@ -273,50 +293,6 @@ def main() -> int:
         p.drawLine(QtCore.QPointF(cx, stem_top), QtCore.QPointF(cx, base_y))
         p.drawLine(QtCore.QPointF(cx - d * 0.22, base_y),
                    QtCore.QPointF(cx + d * 0.22, base_y))
-
-    def _brand_gradient(x0, y0, x1, y1):
-        """The logo's left-to-right colour sweep as a paintable gradient."""
-        g = QtGui.QLinearGradient(x0, y0, x1, y1)
-        for pos, hexc in BRAND_STOPS:
-            g.setColorAt(pos, QtGui.QColor(hexc))
-        return g
-
-    # The logo's waveform, as (x fraction, amplitude) with amplitude in -1..1.
-    # One tall spike just left of centre, decaying wiggles either side, flat as
-    # it leaves through the ring's gaps.
-    _WAVE = ((0.00, 0.00), (0.15, 0.00), (0.20, 0.20), (0.25, -0.30),
-             (0.30, 0.45), (0.35, -0.25), (0.40, 0.32), (0.44, -0.55),
-             (0.48, 1.00), (0.53, -0.88), (0.58, 0.38), (0.63, -0.32),
-             (0.67, 0.58), (0.72, -0.42), (0.77, 0.28), (0.82, -0.16),
-             (0.87, 0.10), (0.92, 0.00), (1.00, 0.00))
-    # Same silhouette with the fine wiggles dropped. Below ~64px the full set
-    # packs peaks closer than the stroke is wide and they smear into a blob.
-    _WAVE_SMALL = ((0.00, 0.00), (0.18, 0.00), (0.28, 0.34), (0.36, -0.40),
-                   (0.48, 1.00), (0.57, -0.80), (0.66, 0.52), (0.74, -0.30),
-                   (0.84, 0.00), (1.00, 0.00))
-
-    def _draw_brand_mark(p, cx, cy, d):
-        """The app logo: a gradient ring, broken at 3 and 9 o'clock where a
-        waveform runs straight through it. Drawn as vectors rather than scaling
-        assets/logo-dark.png, which carries a wordmark that turns to mush below
-        about 120px."""
-        pen = QtGui.QPen(QtGui.QBrush(_brand_gradient(cx - d / 2, cy,
-                                                      cx + d / 2, cy)),
-                         max(1.3, d * 0.085))
-        pen.setCapStyle(QtCore.Qt.RoundCap)
-        pen.setJoinStyle(QtCore.Qt.RoundJoin)
-        p.setPen(pen)
-        p.setBrush(QtCore.Qt.NoBrush)
-        r = d * 0.42
-        ring = QtCore.QRectF(cx - r, cy - r, r * 2, r * 2)
-        p.drawArc(ring, 12 * 16, 156 * 16)    # top arc, gap at each side
-        p.drawArc(ring, 192 * 16, 156 * 16)   # bottom arc
-        path = QtGui.QPainterPath()
-        w, amp = d * 0.98, d * 0.30
-        for i, (fx, fa) in enumerate(_WAVE if d >= 64 else _WAVE_SMALL):
-            pt = QtCore.QPointF(cx - w / 2 + fx * w, cy - fa * amp)
-            path.moveTo(pt) if i == 0 else path.lineTo(pt)
-        p.drawPath(path)
 
     def _shortcut_keys(binding: str):
         """Split a hotkey binding ("Control + Shift + Space") into display key
@@ -388,7 +364,9 @@ def main() -> int:
             self._pin_hint = None      # debug: force a tag open ("gear"/"mic")
             self.settings: dict = {}
             self.settings_dialog = None
+            self.review_dialog = None
             self.feedback_panel = None
+            self.on_settings_changed = None  # set by the tray, to refresh its tip
 
             self.timer = QtCore.QTimer(self)
             self.timer.timeout.connect(self._tick)
@@ -450,6 +428,19 @@ def main() -> int:
                 self.settings_dialog.hotkey.setFocus()
                 self.settings_dialog.hotkey.selectAll()
 
+        def _open_review(self):
+            """Review learnings without going through Settings first (the tray
+            offers it directly)."""
+            if self.review_dialog is None:
+                self.review_dialog = ReviewDialog(
+                    int(self.settings.get("target_pairs", 200)))
+            self.review_dialog.target = max(
+                1, int(self.settings.get("target_pairs", 200)))
+            self.review_dialog.refresh()
+            self.review_dialog.show()
+            self.review_dialog.raise_()
+            self.review_dialog.activateWindow()
+
         # -- protocol ------------------------------------------------------
 
         def handle(self, cmd: str, arg: str):
@@ -467,6 +458,9 @@ def main() -> int:
                     self.settings = json.loads(arg)
                 except json.JSONDecodeError:
                     pass
+                else:
+                    if self.on_settings_changed:
+                        self.on_settings_changed(self.settings)
             elif cmd == "feedback":
                 try:
                     req = json.loads(arg)
@@ -593,6 +587,37 @@ def main() -> int:
             self.settings_dialog.hotkey._stop_capture()
             self.settings_dialog.hide()
             self.reveal = 0.0
+
+            # Review opens straight from the tray, bypassing Settings.
+            self._open_review()
+            check(self.review_dialog is not None and self.review_dialog.isVisible(),
+                  "the tray's Review entry did not open the dialog")
+            self.review_dialog.hide()
+
+            # The tray icon: present, carries a real icon, and offers the four
+            # entries. Settings and Review are triggered for real; Quit and
+            # Restart only checked for presence, since firing them would tear
+            # the app down mid-test.
+            qapp = QtWidgets.QApplication.instance()
+            tray = getattr(qapp, "_tray", None)
+            if tray is None:
+                check(not QtWidgets.QSystemTrayIcon.isSystemTrayAvailable(),
+                      "a system tray is available but no tray icon was created")
+            else:
+                check(not tray.icon().isNull(), "the tray icon has no image")
+                check(branding.APP_NAME in tray.toolTip(),
+                      f"unbranded tray tooltip {tray.toolTip()!r}")
+                labels = [a.text() for a in tray.contextMenu().actions()
+                          if a.text()]
+                for wanted in ("Settings…", "Review learnings…", "Restart", "Quit"):
+                    check(wanted in labels,
+                          f"tray menu is missing {wanted!r} (has {labels})")
+                self.settings_dialog = None
+                tray.contextMenu().actions()[0].trigger()
+                check(self.settings_dialog is not None,
+                      "the tray's Settings entry did not open Settings")
+                self.settings_dialog.hide()
+                self.review_dialog.hide()
 
         # -- animation ------------------------------------------------------
 
@@ -1659,6 +1684,53 @@ def main() -> int:
 
     bar = Bar()
     bar.show()
+
+    def _build_tray():
+        """Windows tray icon: the app's handle when the pill is easy to miss and
+        there may be no console to Ctrl+C. Returns None where no tray exists
+        (some Linux desktops), which is not an error — the pill still works."""
+        if not QtWidgets.QSystemTrayIcon.isSystemTrayAvailable():
+            return None
+        tray = QtWidgets.QSystemTrayIcon(APP_ICON)
+        menu = QtWidgets.QMenu()
+        menu.setStyleSheet(TRAY_QSS)
+
+        def act(text, slot):
+            a = menu.addAction(text)
+            a.triggered.connect(slot)
+            return a
+
+        act("Settings…", lambda: bar._open_settings())
+        act("Review learnings…", bar._open_review)
+        menu.addSeparator()
+        # Restart re-launches the whole app, hotkey loop included, so a changed
+        # speech engine or a wedged model gets a clean process without the user
+        # hunting for the terminal.
+        act("Restart", lambda: emit({"type": "restart"}))
+        act("Quit", lambda: emit({"type": "quit"}))
+        tray.setContextMenu(menu)
+        tray.setToolTip(_tray_tip(bar.settings))
+        # Left-click opens settings; the context menu is the right-click.
+        tray.activated.connect(
+            lambda reason: bar._open_settings()
+            if reason == QtWidgets.QSystemTrayIcon.Trigger else None
+        )
+        tray.show()
+        # Keep a reference on the app or the menu is garbage-collected and the
+        # icon goes dead on right-click.
+        app._tray, app._tray_menu = tray, menu
+        return tray
+
+    def _tray_tip(settings: dict) -> str:
+        key = str(settings.get("hotkey", "") or "").strip()
+        return (f"{branding.APP_NAME} — hold {key} to dictate" if key
+                else branding.APP_NAME)
+
+    tray = _build_tray()
+    if tray is not None:
+        # The tip names the current push-to-talk key, so it has to follow a
+        # rebind rather than being fixed at startup.
+        bar.on_settings_changed = lambda s: tray.setToolTip(_tray_tip(s))
 
     def read_stdin():
         for line in sys.stdin:
