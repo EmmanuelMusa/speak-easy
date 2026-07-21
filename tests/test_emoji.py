@@ -184,16 +184,20 @@ def test_model_deleting_the_emoji_entirely_falls_back():
 
 def test_emoji_run_loses_its_commas_and_spaces():
     from app.emoji import collapse_emoji_runs as run
-    assert run("I like food, 😂, 👍, 🔥, 🚀.") == "I like food, 😂👍🔥🚀."
+    assert run("I like food, 😂, 👍, 🔥, 🚀.") == "I like food 😂👍🔥🚀."
     assert run("nice 😂 👍") == "nice 😂👍"
+    assert run("The meeting went well, 😂; it was chaos.") == (
+        "The meeting went well 😂; it was chaos.")
 
 
-def test_collapsing_keeps_what_comes_before_the_run():
-    """Only separators BETWEEN emoji go; the text leading into the run is the
-    speaker's punctuation and stays."""
+def test_a_period_before_a_run_survives():
+    """The comma leading into a run is a spoken pause and goes; a period is a
+    real sentence ending and stays."""
     from app.emoji import collapse_emoji_runs as run
+    assert run("Ship it today. 🚀") == "Ship it today. 🚀"
     assert run("just 🔥 alone") == "just 🔥 alone"
     assert run("a 😂, and 👍") == "a 😂, and 👍"   # a word between: not a run
+    assert run("😂 at the very start") == "😂 at the very start"
 
 
 def test_collapsing_handles_multi_codepoint_emoji():

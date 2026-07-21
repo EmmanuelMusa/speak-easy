@@ -312,6 +312,14 @@ _EMOJI_ALT = "|".join(re.escape(c) for c in sorted(EMOJI, key=len, reverse=True)
 _EMOJI_SEPARATOR_RE = re.compile(
     rf"({_EMOJI_ALT})[,\s]+(?=(?:{_EMOJI_ALT}))"
 )
+# The comma leading INTO a run goes as well: "I like food, 😂" is a pause you
+# made while speaking, not punctuation you want to read. Only a comma or
+# semicolon — a period is a real sentence end and stays ("Ship it. 🚀").
+# (?<=\S) keeps a run at the very start of the text from gaining a leading
+# space.
+_EMOJI_LEADIN_RE = re.compile(
+    rf"(?<=\S)[ \t]*[,;]+[ \t]*(?=(?:{_EMOJI_ALT}))"
+)
 # Cheap reject: scanning the 187-branch alternation over a whole dictation costs
 # ~285µs even when there is no emoji in it. A regex character class is NOT the
 # way to rule that out — Python's re falls off a fast path when a class is full
@@ -321,12 +329,12 @@ _EMOJI_LEAD_CHARS = frozenset(char[0] for char in EMOJI)
 
 
 def collapse_emoji_runs(text: str) -> str:
-    """Butt consecutive emoji together, dropping the commas and spaces between
-    them: "I like food, 😂, 👍, 🔥" -> "I like food, 😂👍🔥".
+    """Butt consecutive emoji together and drop the comma leading into them:
+    "I like food, 😂, 👍, 🔥, 🚀." -> "I like food 😂👍🔥🚀."
 
-    Dictating a list of emoji produces separators that read as punctuation in
-    speech but look wrong on screen — nobody types "😂, 👍". Only separators
-    BETWEEN emoji are removed; whatever precedes the run is left alone.
+    Dictating emoji produces separators that are pauses in speech but read as
+    punctuation on screen — nobody types "food, 😂, 👍". A period before a run
+    survives, because that is a real sentence ending.
 
     Separate from apply_spoken_emoji, and not gated on the marker word, because
     the cleanup model often emits the emoji itself — by then "emoji" is gone
@@ -334,4 +342,5 @@ def collapse_emoji_runs(text: str) -> str:
     """
     if not text or _EMOJI_LEAD_CHARS.isdisjoint(text):
         return text
-    return _EMOJI_SEPARATOR_RE.sub(r"\1", text)
+    text = _EMOJI_SEPARATOR_RE.sub(r"\1", text)
+    return _EMOJI_LEADIN_RE.sub(" ", text)
